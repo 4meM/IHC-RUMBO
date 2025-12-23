@@ -1,0 +1,1 @@
+// UseCase: Obtener reportes

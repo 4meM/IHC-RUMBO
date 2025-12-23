@@ -1,0 +1,1 @@
+// Widget: Snackbar de error
