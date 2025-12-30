@@ -4,6 +4,7 @@ import 'core/constants/app_colors.dart';
 import 'features/auth/presentation/pages/login_page.dart';
 import 'features/auth/presentation/pages/verify_code_page.dart';
 import 'features/trip_planner/presentation/pages/search_page.dart';
+import 'features/live_tracking/presentation/pages/live_tracking_page.dart';
 class RumboApp extends StatelessWidget {
   const RumboApp({super.key});
 
@@ -29,7 +30,7 @@ class RumboApp extends StatelessWidget {
 
 // GoRouter Configuration
 final GoRouter _router = GoRouter(
-  initialLocation: '/login',
+  initialLocation: '/tracking',
   routes: [
     GoRoute(
       path: '/login',
@@ -45,6 +46,16 @@ final GoRouter _router = GoRouter(
     GoRoute(
       path: '/home',
       builder: (context, state) => const SearchPage(),
+    ),
+    GoRoute(
+      path: '/tracking',
+      builder: (context, state) {
+        final extra = state.extra as Map<String, String>? ?? {};
+        return LiveTrackingPage(
+          busNumber: extra['busNumber'] ?? '12',
+          routeName: extra['routeName'] ?? 'Centro - Cercado',
+        );
+      },
     ),
   ],
 );

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:go_router/go_router.dart';
 
 class MapPreview extends StatefulWidget {
   const MapPreview({super.key});
@@ -200,6 +201,22 @@ class _MapPreviewState extends State<MapPreview> {
               ),
             ),
           ),
+        // Botón de prueba para ir a tracking (temporal)
+        Positioned(
+          bottom: 80,
+          right: 16,
+          child: FloatingActionButton.extended(
+            onPressed: () {
+              context.push('/tracking', extra: {
+                'busNumber': '12',
+                'routeName': 'Centro - Cercado',
+              });
+            },
+            icon: const Icon(Icons.directions_bus),
+            label: const Text('Ver Tracking'),
+            backgroundColor: Colors.blue,
+          ),
+        ),
       ],
     );
   }
