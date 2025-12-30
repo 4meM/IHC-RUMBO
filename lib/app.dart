@@ -3,7 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'core/constants/app_colors.dart';
 import 'features/auth/presentation/pages/login_page.dart';
 import 'features/auth/presentation/pages/verify_code_page.dart';
-
+import 'features/trip_planner/presentation/pages/search_page.dart';
 class RumboApp extends StatelessWidget {
   const RumboApp({super.key});
 
@@ -44,36 +44,7 @@ final GoRouter _router = GoRouter(
     ),
     GoRoute(
       path: '/home',
-      builder: (context, state) => Scaffold(
-        appBar: AppBar(
-          title: const Text('RUMBO'),
-        ),
-        body: const Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.check_circle, color: AppColors.success, size: 64),
-              SizedBox(height: 16),
-              Text(
-                '¡Autenticación exitosa!',
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-              SizedBox(height: 8),
-              Text(
-                'Aquí irá el mapa principal',
-                style: TextStyle(
-                  fontSize: 16,
-                  color: AppColors.textSecondary,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+      builder: (context, state) => const SearchPage(),
     ),
   ],
 );
