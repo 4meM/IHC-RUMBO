@@ -8,6 +8,7 @@ import '../../../../core/constants/app_colors.dart';
 import '../../data/models/bus_route_model.dart';
 import '../../data/services/geojson_parser_service.dart';
 import 'route_navigation_controls.dart';
+import 'package:go_router/go_router.dart';
 
 class MapPreview extends StatefulWidget {
   const MapPreview({super.key});
@@ -764,7 +765,7 @@ class _MapPreviewState extends State<MapPreview> {
         ),
       );
     }
-    
+
     return Stack(
       children: [
         GoogleMap(
@@ -789,7 +790,7 @@ class _MapPreviewState extends State<MapPreview> {
           buildingsEnabled: false,
           trafficEnabled: false,
         ),
-        
+
         Positioned(
           top: 60,
           left: 16,
@@ -821,7 +822,8 @@ class _MapPreviewState extends State<MapPreview> {
             ],
           ),
         ),
-        
+
+        // Fase 1: Mostrar flecha solo si aún no se muestran rutas
         if (_canContinue && !_showRouteNavigation)
           Positioned(
             bottom: 120,
@@ -836,25 +838,54 @@ class _MapPreviewState extends State<MapPreview> {
               ),
             ),
           ),
-        
+
+        // Fase 2: Mostrar controles de rutas y botón tracking
         if (_showRouteNavigation && _routeGroups.isNotEmpty)
           Positioned(
             bottom: 80,
             left: 0,
             right: 0,
-            child: Center(
-              child: RouteNavigationControls(
-                currentGroup: _routeGroups.isNotEmpty ? _routeGroups[_currentRouteIndex] : null,
-                currentIndex: _currentRouteIndex,
-                totalRoutes: _routeGroups.length,
-                onPrevious: _previousStep,
-                onNext: _nextStep,
-                onClose: _closeRouteNavigation,
-                onCycleRoute: _nextRoute,
-              ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Center(
+                  child: RouteNavigationControls(
+                    currentGroup: _routeGroups.isNotEmpty ? _routeGroups[_currentRouteIndex] : null,
+                    currentIndex: _currentRouteIndex,
+                    totalRoutes: _routeGroups.length,
+                    onPrevious: _previousStep,
+                    onNext: _nextStep,
+                    onClose: _closeRouteNavigation,
+                    onCycleRoute: _nextRoute,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                // Botón Tracking
+                FloatingActionButton.extended(
+                  onPressed: () {
+                    // Usar datos reales de la ruta seleccionada
+                    final route = _routeGroups[_currentRouteIndex];
+                    final busNumber = route.outbound?.id ?? '12';
+                    final routeName = route.outbound?.name ?? 'Ruta';
+                    final routeCoordinates = route.outbound?.coordinates ?? [];
+                    context.push('/tracking', extra: {
+                      'busNumber': busNumber,
+                      'routeName': routeName,
+                      'originLat': _originPosition?.latitude,
+                      'originLng': _originPosition?.longitude,
+                      'destinationLat': _destinationPosition?.latitude,
+                      'destinationLng': _destinationPosition?.longitude,
+                      'routePoints': routeCoordinates,
+                    });
+                  },
+                  icon: const Icon(Icons.directions_bus),
+                  label: const Text('Ver Tracking'),
+                  backgroundColor: Colors.blue,
+                ),
+              ],
             ),
           ),
-        
+
         if (_errorMessage != null)
           Positioned(
             top: 180,

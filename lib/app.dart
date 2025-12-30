@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'core/constants/app_colors.dart';
 import 'features/auth/presentation/pages/login_page.dart';
 import 'features/auth/presentation/pages/verify_code_page.dart';
 import 'features/trip_planner/presentation/pages/search_page.dart';
+import 'features/live_tracking/presentation/pages/live_tracking_page.dart';
 class RumboApp extends StatelessWidget {
   const RumboApp({super.key});
 
@@ -45,6 +47,21 @@ final GoRouter _router = GoRouter(
     GoRoute(
       path: '/home',
       builder: (context, state) => const SearchPage(),
+    ),
+    GoRoute(
+      path: '/tracking',
+      builder: (context, state) {
+        final extra = state.extra as Map<String, dynamic>? ?? {};
+        return LiveTrackingPage(
+          busNumber: extra['busNumber'] as String? ?? '12',
+          routeName: extra['routeName'] as String? ?? 'Centro - Cercado',
+          originLat: extra['originLat'] as double?,
+          originLng: extra['originLng'] as double?,
+          destinationLat: extra['destinationLat'] as double?,
+          destinationLng: extra['destinationLng'] as double?,
+          routePoints: extra['routePoints'] as List<LatLng>?,
+        );
+      },
     ),
   ],
 );
