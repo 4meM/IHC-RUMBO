@@ -69,9 +69,8 @@ dev_dependencies:
 flutter:
   uses-material-design: true
 
-  # assets:
-  #   - images/
-  #   - assets/
+  assets:
+    - assets/map_style_minimal.json
 
   # fonts:
   #   - family: Montserrat
