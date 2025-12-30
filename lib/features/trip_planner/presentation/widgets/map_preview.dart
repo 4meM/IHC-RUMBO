@@ -5,6 +5,9 @@ import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../../../../core/constants/app_colors.dart';
+import '../../data/models/bus_route_model.dart';
+import '../../data/services/geojson_parser_service.dart';
+import 'route_navigation_controls.dart';
 
 class MapPreview extends StatefulWidget {
   const MapPreview({super.key});
@@ -43,6 +46,13 @@ class _MapPreviewState extends State<MapPreview> {
   
   final String _googleApiKey = 'AIzaSyABjCnncfqwu10vFn3BT7KWTLAewEgOl3I';
   
+  // Rutas de buses
+  final GeoJsonParserService _geoJsonService = GeoJsonParserService();
+  List<RouteGroup> _routeGroups = [];
+  int _currentRouteIndex = 0;
+  bool _showRouteNavigation = false;
+  Set<Polyline> _polylines = {};
+  
   bool get _canContinue => 
     _originPosition != null && _destinationPosition != null;
 
@@ -51,6 +61,7 @@ class _MapPreviewState extends State<MapPreview> {
     super.initState();
     _loadMapStyle();
     _initializeLocation();
+    // No cargar todas las rutas al inicio, solo cuando se busque
     _originController.text = 'Tu Ubicación';
     
     _originController.addListener(() {
@@ -299,19 +310,81 @@ class _MapPreviewState extends State<MapPreview> {
     );
   }
 
-  void _onContinue() {
+  void _onContinue() async {
     if (!_canContinue) return;
     
+    if (_originPosition == null || _destinationPosition == null) return;
+    
     setState(() {
-      _phase = SelectionPhase.completed;
+      _isLoading = true;
     });
     
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Buscando rutas...'),
-        backgroundColor: AppColors.success,
-      ),
+    // Buscar las mejores rutas
+    final bestRoutes = await _geoJsonService.findBestRoutes(
+      origin: _originPosition!,
+      destination: _destinationPosition!,
+      maxWalkingDistanceMeters: 500,
     );
+    
+    if (bestRoutes.isEmpty) {
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'No se encontraron rutas que conecten origen y destino.\nIntenta aumentar la distancia de caminata.';
+      });
+      return;
+    }
+    
+    setState(() {
+      _routeGroups = bestRoutes.map((r) => r.route).toList();
+      _phase = SelectionPhase.completed;
+      _showRouteNavigation = true;
+      _currentRouteIndex = 0;
+      _isLoading = false;
+    });
+    
+    print('🎯 Mostrando ${_routeGroups.length} rutas óptimas');
+    _showCurrentRoute();
+  }
+  
+  void _showCurrentRoute() {
+    if (_routeGroups.isEmpty) return;
+    
+    final group = _routeGroups[_currentRouteIndex];
+    setState(() {
+      _polylines = group.toPolylines();
+    });
+    
+    // Centrar mapa en la primera ruta disponible
+    final route = group.outbound ?? group.return_;
+    if (route != null && route.coordinates.isNotEmpty && mapController != null) {
+      mapController!.animateCamera(
+        CameraUpdate.newLatLng(route.coordinates.first),
+      );
+    }
+  }
+  
+  void _nextRoute() {
+    setState(() {
+      // Comportamiento circular: después del último vuelve al primero
+      _currentRouteIndex = (_currentRouteIndex + 1) % _routeGroups.length;
+    });
+    _showCurrentRoute();
+  }
+  
+  void _previousRoute() {
+    if (_currentRouteIndex > 0) {
+      setState(() {
+        _currentRouteIndex--;
+      });
+      _showCurrentRoute();
+    }
+  }
+  
+  void _closeRouteNavigation() {
+    setState(() {
+      _showRouteNavigation = false;
+      _polylines.clear();
+    });
   }
 
   Future<void> _searchPlaces(String query, {required bool isOrigin}) async {
@@ -560,6 +633,7 @@ class _MapPreviewState extends State<MapPreview> {
             zoom: 15.0,
           ),
           markers: _markers,
+          polylines: _polylines,
           myLocationEnabled: true,
           myLocationButtonEnabled: false,
           compassEnabled: true,
@@ -600,7 +674,7 @@ class _MapPreviewState extends State<MapPreview> {
           ),
         ),
         
-        if (_canContinue)
+        if (_canContinue && !_showRouteNavigation)
           Positioned(
             bottom: 120,
             right: 24,
@@ -612,6 +686,20 @@ class _MapPreviewState extends State<MapPreview> {
                 color: Colors.white,
                 size: 28,
               ),
+            ),
+          ),
+        
+        if (_showRouteNavigation && _routeGroups.isNotEmpty)
+          Positioned(
+            bottom: 200,
+            left: 24,
+            child: RouteNavigationControls(
+              currentGroup: _routeGroups.isNotEmpty ? _routeGroups[_currentRouteIndex] : null,
+              currentIndex: _currentRouteIndex,
+              totalRoutes: _routeGroups.length,
+              onPrevious: _previousRoute,
+              onNext: _nextRoute,
+              onClose: _closeRouteNavigation,
             ),
           ),
         
