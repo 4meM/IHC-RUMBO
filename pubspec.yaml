@@ -31,6 +31,7 @@ dependencies:
 
   # --- MAPAS ---
   google_maps_flutter: ^2.9.0
+  http: ^1.2.0
 
   # --- BASE DE DATOS LOCAL ---
   hive: ^2.2.3
@@ -71,6 +72,8 @@ flutter:
 
   assets:
     - assets/map_style_minimal.json
+    - assets/data-buses/export.geojson
+    - assets/images/ico_bus.png
 
   # fonts:
   #   - family: Montserrat
