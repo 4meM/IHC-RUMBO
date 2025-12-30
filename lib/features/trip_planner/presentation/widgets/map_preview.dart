@@ -49,6 +49,7 @@ class _MapPreviewState extends State<MapPreview> {
   // Rutas de buses
   final GeoJsonParserService _geoJsonService = GeoJsonParserService();
   List<RouteGroup> _routeGroups = [];
+  List<RouteWithScore> _routeScores = [];
   int _currentRouteIndex = 0;
   bool _showRouteNavigation = false;
   Set<Polyline> _polylines = {};
@@ -186,8 +187,10 @@ class _MapPreviewState extends State<MapPreview> {
   }
 
   void _moveToCurrentLocation() {
-    if (_currentPosition != null && mapController != null) {
-      print('🗺️ Moviendo cámara a: $_currentPosition');
+    // Solo mover a ubicación actual si estamos en fase origen y no hay origen seleccionado
+    if (_currentPosition != null && mapController != null && 
+        _phase == SelectionPhase.origin && _originPosition == _currentPosition) {
+      print('🗺️ Moviendo cámara a ubicación actual: $_currentPosition');
       mapController!.animateCamera(
         CameraUpdate.newCameraPosition(
           CameraPosition(
@@ -335,6 +338,7 @@ class _MapPreviewState extends State<MapPreview> {
     }
     
     setState(() {
+      _routeScores = bestRoutes;
       _routeGroups = bestRoutes.map((r) => r.route).toList();
       _phase = SelectionPhase.completed;
       _showRouteNavigation = true;
@@ -346,20 +350,82 @@ class _MapPreviewState extends State<MapPreview> {
     _showCurrentRoute();
   }
   
-  void _showCurrentRoute() {
-    if (_routeGroups.isEmpty) return;
+  void _showCurrentRoute() async {
+    if (_routeGroups.isEmpty || _routeScores.isEmpty) return;
     
     final group = _routeGroups[_currentRouteIndex];
+    final routeScore = _routeScores[_currentRouteIndex];
+    
+    // Primero mostrar las polylines del bus
     setState(() {
       _polylines = group.toPolylines();
     });
     
-    // Centrar mapa en la primera ruta disponible
-    final route = group.outbound ?? group.return_;
-    if (route != null && route.coordinates.isNotEmpty && mapController != null) {
+    // Agregar ruta de caminata desde origen hasta punto de recogida
+    if (_originPosition != null && routeScore.pickupPoint != null) {
+      final walkingPoints = await _getWalkingRoute(_originPosition!, routeScore.pickupPoint!);
+      if (walkingPoints != null && walkingPoints.isNotEmpty) {
+        setState(() {
+          _polylines.add(Polyline(
+            polylineId: const PolylineId('walking_to_pickup'),
+            points: walkingPoints,
+            color: Colors.blue,
+            width: 4,
+            patterns: [PatternItem.dash(20), PatternItem.gap(10)],
+            geodesic: true,
+          ));
+        });
+        print('🚶 Ruta de caminata trazada: ${walkingPoints.length} puntos');
+      } else {
+        // Fallback a línea recta si falla la API
+        setState(() {
+          _polylines.add(Polyline(
+            polylineId: const PolylineId('walking_to_pickup'),
+            points: [_originPosition!, routeScore.pickupPoint!],
+            color: Colors.blue,
+            width: 4,
+            patterns: [PatternItem.dash(20), PatternItem.gap(10)],
+            geodesic: true,
+          ));
+        });
+      }
+    }
+    
+    // Agregar ruta de caminata desde punto de bajada hasta destino
+    if (_destinationPosition != null && routeScore.dropoffPoint != null) {
+      final walkingPoints = await _getWalkingRoute(routeScore.dropoffPoint!, _destinationPosition!);
+      if (walkingPoints != null && walkingPoints.isNotEmpty) {
+        setState(() {
+          _polylines.add(Polyline(
+            polylineId: const PolylineId('walking_to_destination'),
+            points: walkingPoints,
+            color: Colors.blue,
+            width: 4,
+            patterns: [PatternItem.dash(20), PatternItem.gap(10)],
+            geodesic: true,
+          ));
+        });
+      } else {
+        // Fallback a línea recta si falla la API
+        setState(() {
+          _polylines.add(Polyline(
+            polylineId: const PolylineId('walking_to_destination'),
+            points: [routeScore.dropoffPoint!, _destinationPosition!],
+            color: Colors.blue,
+            width: 4,
+            patterns: [PatternItem.dash(20), PatternItem.gap(10)],
+            geodesic: true,
+          ));
+        });
+      }
+    }
+    
+    // Centrar mapa en el punto de origen (punto verde) en lugar del inicio de la ruta
+    if (_originPosition != null && mapController != null) {
       mapController!.animateCamera(
-        CameraUpdate.newLatLng(route.coordinates.first),
+        CameraUpdate.newLatLngZoom(_originPosition!, 15),
       );
+      print('📍 Centrando en punto de origen: $_originPosition');
     }
   }
   
@@ -371,13 +437,39 @@ class _MapPreviewState extends State<MapPreview> {
     _showCurrentRoute();
   }
   
-  void _previousRoute() {
-    if (_currentRouteIndex > 0) {
+  void _nextStep() {
+    if (_phase == SelectionPhase.origin) {
+      print('📍 Cambiando a fase destination. Origen: $_originPosition');
       setState(() {
-        _currentRouteIndex--;
+        _phase = SelectionPhase.destination;
       });
-      _showCurrentRoute();
+      // Centrar la cámara en el origen seleccionado después de actualizar el estado
+      if (_originPosition != null && mapController != null) {
+        print('📍 Moviendo cámara al origen: $_originPosition');
+        Future.delayed(const Duration(milliseconds: 300), () {
+          mapController?.animateCamera(
+            CameraUpdate.newLatLngZoom(_originPosition!, 16),
+          );
+        });
+      }
+    } else if (_phase == SelectionPhase.destination && _originPosition != null) {
+      // Continuar con búsqueda de rutas si ya hay destino
+      if (_destinationPosition != null) {
+        _onContinue();
+      }
     }
+  }
+  
+  void _previousStep() {
+    setState(() {
+      if (_phase == SelectionPhase.completed) {
+        _phase = SelectionPhase.destination;
+        _showRouteNavigation = false;
+        _polylines.clear();
+      } else if (_phase == SelectionPhase.destination) {
+        _phase = SelectionPhase.origin;
+      }
+    });
   }
   
   void _closeRouteNavigation() {
@@ -385,6 +477,62 @@ class _MapPreviewState extends State<MapPreview> {
       _showRouteNavigation = false;
       _polylines.clear();
     });
+  }
+
+  // Decodificar polyline de Google Maps
+  List<LatLng> _decodePolyline(String encoded) {
+    List<LatLng> points = [];
+    int index = 0, len = encoded.length;
+    int lat = 0, lng = 0;
+
+    while (index < len) {
+      int b, shift = 0, result = 0;
+      do {
+        b = encoded.codeUnitAt(index++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (b >= 0x20);
+      int dlat = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
+      lat += dlat;
+
+      shift = 0;
+      result = 0;
+      do {
+        b = encoded.codeUnitAt(index++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (b >= 0x20);
+      int dlng = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
+      lng += dlng;
+
+      points.add(LatLng(lat / 1E5, lng / 1E5));
+    }
+    return points;
+  }
+
+  // Obtener ruta de caminata usando Google Directions API
+  Future<List<LatLng>?> _getWalkingRoute(LatLng origin, LatLng destination) async {
+    try {
+      final url = Uri.parse(
+        'https://maps.googleapis.com/maps/api/directions/json?'
+        'origin=${origin.latitude},${origin.longitude}&'
+        'destination=${destination.latitude},${destination.longitude}&'
+        'mode=walking&'
+        'key=$_googleApiKey'
+      );
+
+      final response = await http.get(url);
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['routes'] != null && data['routes'].isNotEmpty) {
+          final polyline = data['routes'][0]['overview_polyline']['points'];
+          return _decodePolyline(polyline);
+        }
+      }
+    } catch (e) {
+      print('❌ Error obteniendo ruta de caminata: $e');
+    }
+    return null;
   }
 
   Future<void> _searchPlaces(String query, {required bool isOrigin}) async {
@@ -691,15 +839,19 @@ class _MapPreviewState extends State<MapPreview> {
         
         if (_showRouteNavigation && _routeGroups.isNotEmpty)
           Positioned(
-            bottom: 200,
-            left: 24,
-            child: RouteNavigationControls(
-              currentGroup: _routeGroups.isNotEmpty ? _routeGroups[_currentRouteIndex] : null,
-              currentIndex: _currentRouteIndex,
-              totalRoutes: _routeGroups.length,
-              onPrevious: _previousRoute,
-              onNext: _nextRoute,
-              onClose: _closeRouteNavigation,
+            bottom: 80,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: RouteNavigationControls(
+                currentGroup: _routeGroups.isNotEmpty ? _routeGroups[_currentRouteIndex] : null,
+                currentIndex: _currentRouteIndex,
+                totalRoutes: _routeGroups.length,
+                onPrevious: _previousStep,
+                onNext: _nextStep,
+                onClose: _closeRouteNavigation,
+                onCycleRoute: _nextRoute,
+              ),
             ),
           ),
         
