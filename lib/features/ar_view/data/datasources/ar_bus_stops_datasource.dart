@@ -1,5 +1,6 @@
 import '../models/ar_bus_stop_model.dart';
 import 'dart:math' as Math;
+
 /// DataSource para obtener datos de paraderos (paradas de autobús)
 abstract class ARBusStopsDataSource {
   /// Obtiene una lista de paraderos cercanos a la ubicación del usuario
@@ -11,6 +12,12 @@ abstract class ARBusStopsDataSource {
 
   /// Obtiene todos los paraderos de Arequipa
   Future<List<ARBusStopModel>> getAllBusStops();
+
+  /// Obtiene el paradero más cercano a la ubicación del usuario
+  Future<ARBusStopModel?> getNearestBusStop(
+    double userLat,
+    double userLng,
+  );
 }
 
 /// Implementación con datos reales de Arequipa
@@ -134,6 +141,35 @@ class ARBusStopsDataSourceImpl implements ARBusStopsDataSource {
     // Simulación de delay de red
     await Future.delayed(const Duration(milliseconds: 300));
     return _allBusStops;
+  }
+
+  @override
+  Future<ARBusStopModel?> getNearestBusStop(
+    double userLat,
+    double userLng,
+  ) async {
+    // Simulación de delay de red
+    await Future.delayed(const Duration(milliseconds: 300));
+
+    if (_allBusStops.isEmpty) return null;
+
+    ARBusStopModel? nearest;
+    double minDistance = double.infinity;
+
+    for (final stop in _allBusStops) {
+      final distance = _calculateDistance(
+        userLat,
+        userLng,
+        stop.latitude,
+        stop.longitude,
+      );
+      if (distance < minDistance) {
+        minDistance = distance;
+        nearest = stop;
+      }
+    }
+
+    return nearest;
   }
 
   /// Calcula la distancia entre dos puntos usando la fórmula de Haversine

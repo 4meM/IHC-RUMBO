@@ -18,14 +18,16 @@ class ARViewLoading extends ARViewState {
 class ARViewReady extends ARViewState {
   final ARUserLocation? userLocation;
   final List<ARBusMarker> nearbyBuses;
+  final ARBusStop? nearestBusStop;
 
   const ARViewReady({
     required this.userLocation,
     required this.nearbyBuses,
+    this.nearestBusStop,
   });
 
   @override
-  List<Object?> get props => [userLocation, nearbyBuses];
+  List<Object?> get props => [userLocation, nearbyBuses, nearestBusStop];
 }
 
 class ARViewError extends ARViewState {

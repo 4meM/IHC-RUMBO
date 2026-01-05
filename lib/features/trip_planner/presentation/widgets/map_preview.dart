@@ -5,7 +5,6 @@ import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../../../../core/constants/app_colors.dart';
-import '../../data/models/bus_route_model.dart';
 import '../../data/services/geojson_parser_service.dart';
 import 'route_navigation_controls.dart';
 import 'package:go_router/go_router.dart';

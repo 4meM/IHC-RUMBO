@@ -1,16 +1,19 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../../domain/entities/ar_bus_marker.dart';
+import '../../domain/entities/ar_bus_stop.dart';
 import '../../domain/entities/ar_user_location.dart';
 
 class ARCameraView extends StatefulWidget {
   final ARUserLocation? userLocation;
   final List<ARBusMarker> nearbyBuses;
+  final ARBusStop? nearestBusStop;
 
   const ARCameraView({
     Key? key,
     required this.userLocation,
     required this.nearbyBuses,
+    this.nearestBusStop,
   }) : super(key: key);
 
   @override
@@ -52,6 +55,10 @@ class _ARCameraViewState extends State<ARCameraView>
           ),
         ),
 
+        // Mostrar paradero más cercano si existe
+        if (widget.userLocation != null && widget.nearestBusStop != null)
+          ..._buildBusStopMarker(context),
+
         // Mostrar buses cercanos con animaciones AR
         if (widget.userLocation != null)
           ..._buildARMarkers(context),
@@ -69,6 +76,152 @@ class _ARCameraViewState extends State<ARCameraView>
           bottom: 32,
           right: 16,
           child: _buildCompass(),
+        ),
+      ],
+    );
+  }
+
+  List<Widget> _buildBusStopMarker(BuildContext context) {
+    final screenSize = MediaQuery.of(context).size;
+    final centerX = screenSize.width / 2;
+    final centerY = screenSize.height / 2;
+
+    final busStop = widget.nearestBusStop!;
+
+    // Calcular distancia aproximada (simplificado)
+    const earthRadiusKm = 6371;
+    final dLat = _degreesToRadians(
+      busStop.latitude - widget.userLocation!.latitude,
+    );
+    final dLng = _degreesToRadians(
+      busStop.longitude - widget.userLocation!.longitude,
+    );
+
+    final a = (dLat / 2) * (dLat / 2) + (dLng / 2) * (dLng / 2);
+    final c = 2 * (a.abs());
+    final distance = earthRadiusKm * c * 1000; // metros
+
+    // Calcular bearing (dirección)
+    final bearing = _calculateBearing(
+      widget.userLocation!.latitude,
+      widget.userLocation!.longitude,
+      busStop.latitude,
+      busStop.longitude,
+    );
+
+    final angle = bearing * (math.pi / 180);
+
+    // Mapear distancia a posición en pantalla
+    final screenDistance = (distance / 1000) * math.min(centerX, centerY);
+
+    final offsetX = screenDistance * math.sin(angle);
+    final offsetY = -screenDistance * math.cos(angle);
+
+    return [
+      Positioned(
+        left: centerX + offsetX - 50,
+        top: centerY + offsetY - 50,
+        child: ScaleTransition(
+          scale: _animationController,
+          child: _buildBusStopIcon(busStop, distance),
+        ),
+      ),
+    ];
+  }
+
+  Widget _buildBusStopIcon(ARBusStop busStop, double distance) {
+    final isVeryClose = distance < 100;
+
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Ícono de paradero
+        Container(
+          width: 100,
+          height: 100,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: LinearGradient(
+              colors: isVeryClose
+                  ? [Colors.green.shade400, Colors.green.shade600]
+                  : [Colors.blue.shade400, Colors.blue.shade600],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: (isVeryClose ? Colors.green : Colors.blue)
+                    .withOpacity(0.8),
+                blurRadius: 30,
+                spreadRadius: 8,
+              ),
+            ],
+          ),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Icon(
+                Icons.directions_bus_filled,
+                size: 50,
+                color: Colors.white,
+              ),
+              if (isVeryClose)
+                Positioned(
+                  bottom: 4,
+                  right: 4,
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.yellow.shade600,
+                    ),
+                    child: const Icon(
+                      Icons.check_circle,
+                      size: 16,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        // Información del paradero
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.8),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: isVeryClose ? Colors.greenAccent : Colors.cyan,
+              width: 2,
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                busStop.name,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '${distance.toStringAsFixed(0)} m',
+                style: TextStyle(
+                  color: isVeryClose ? Colors.greenAccent : Colors.cyan,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
         ),
       ],
     );
@@ -431,4 +584,22 @@ class ARGridPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(ARGridPainter oldDelegate) => false;
+}
+
+// Extensiones de helper
+extension ARCameraViewHelper on _ARCameraViewState {
+  double _degreesToRadians(double degrees) {
+    return degrees * (math.pi / 180);
+  }
+
+  double _calculateBearing(double lat1, double lng1, double lat2, double lng2) {
+    final dLng = _degreesToRadians(lng2 - lng1);
+    final y = math.sin(dLng) * math.cos(_degreesToRadians(lat2));
+    final x = math.cos(_degreesToRadians(lat1)) * math.sin(_degreesToRadians(lat2)) -
+        math.sin(_degreesToRadians(lat1)) * math.cos(_degreesToRadians(lat2)) * math.cos(dLng);
+    var bearing = math.atan2(y, x);
+    bearing = bearing * 180 / math.pi;
+    bearing = (bearing + 360) % 360;
+    return bearing;
+  }
 }

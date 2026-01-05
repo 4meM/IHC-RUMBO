@@ -2,9 +2,11 @@ import 'package:bloc/bloc.dart';
 import 'package:equatable/equatable.dart';
 import '../../../../core/usecases/usecase.dart';
 import '../../domain/entities/ar_bus_marker.dart';
+import '../../domain/entities/ar_bus_stop.dart';
 import '../../domain/entities/ar_user_location.dart';
 import '../../domain/usecases/check_and_request_location_permissions.dart';
 import '../../domain/usecases/get_nearby_buses_usecase.dart';
+import '../../domain/usecases/get_nearest_bus_stop_usecase.dart';
 import '../../domain/usecases/get_user_location_stream.dart';
 
 part 'ar_view_event.dart';
@@ -14,15 +16,18 @@ class ARViewBloc extends Bloc<ARViewEvent, ARViewState> {
   final GetUserLocationStream getUserLocationStream;
   final GetNearbyBusesUseCase getNearbyBuses;
   final CheckAndRequestLocationPermissions checkPermissions;
+  final GetNearestBusStopUseCase getNearestBusStop;
 
   ARViewBloc({
     required this.getUserLocationStream,
     required this.getNearbyBuses,
     required this.checkPermissions,
+    required this.getNearestBusStop,
   }) : super(const ARViewInitial()) {
     on<InitializeARViewEvent>(_onInitializeARView);
     on<UpdateUserLocationEvent>(_onUpdateUserLocation);
     on<UpdateNearbyBusesEvent>(_onUpdateNearbyBuses);
+    on<UpdateNearestBusStopEvent>(_onUpdateNearestBusStop);
     on<StopARViewEvent>(_onStopARView);
   }
 
@@ -74,10 +79,17 @@ class ARViewBloc extends Bloc<ARViewEvent, ARViewState> {
           emit(ARViewReady(
             userLocation: userLocation,
             nearbyBuses: currentState.nearbyBuses,
+            nearestBusStop: currentState.nearestBusStop,
           ));
 
           // Solicitar buses cercanos cuando la ubicación cambia
           add(UpdateNearbyBusesEvent(
+            userLat: userLocation.latitude,
+            userLng: userLocation.longitude,
+          ));
+
+          // Solicitar paradero más cercano
+          add(UpdateNearestBusStopEvent(
             userLat: userLocation.latitude,
             userLng: userLocation.longitude,
           ));
@@ -108,10 +120,37 @@ class ARViewBloc extends Bloc<ARViewEvent, ARViewState> {
               emit(ARViewReady(
                 userLocation: currentState.userLocation,
                 nearbyBuses: buses,
+                nearestBusStop: currentState.nearestBusStop,
               ));
             }
           },
         );
+      },
+    );
+  }
+
+  Future<void> _onUpdateNearestBusStop(
+    UpdateNearestBusStopEvent event,
+    Emitter<ARViewState> emit,
+  ) async {
+    final result = await getNearestBusStop(GetNearestBusStopParams(
+      userLat: event.userLat,
+      userLng: event.userLng,
+    ));
+
+    result.fold(
+      (failure) {
+        emit(ARViewError(failure.toString()));
+      },
+      (busStop) {
+        final currentState = state;
+        if (currentState is ARViewReady) {
+          emit(ARViewReady(
+            userLocation: currentState.userLocation,
+            nearbyBuses: currentState.nearbyBuses,
+            nearestBusStop: busStop,
+          ));
+        }
       },
     );
   }

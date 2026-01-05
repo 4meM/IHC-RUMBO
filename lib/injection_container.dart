@@ -4,12 +4,14 @@ import 'package:dio/dio.dart';
 // AR View Feature
 import 'features/ar_view/data/datasources/ar_location_datasource.dart';
 import 'features/ar_view/data/datasources/ar_bus_datasource.dart';
+import 'features/ar_view/data/datasources/ar_bus_stops_datasource.dart';
 import 'features/ar_view/data/repositories/ar_location_repository_impl.dart';
 import 'features/ar_view/data/repositories/ar_bus_repository_impl.dart';
 import 'features/ar_view/domain/repositories/ar_location_repository.dart';
 import 'features/ar_view/domain/repositories/ar_bus_repository.dart';
 import 'features/ar_view/domain/usecases/get_user_location_stream.dart';
 import 'features/ar_view/domain/usecases/get_nearby_buses_usecase.dart';
+import 'features/ar_view/domain/usecases/get_nearest_bus_stop_usecase.dart';
 import 'features/ar_view/domain/usecases/check_and_request_location_permissions.dart';
 import 'features/ar_view/presentation/bloc/ar_view_bloc.dart';
 
@@ -50,6 +52,10 @@ Future<void> init() async {
     () => ARBusDataSourceImpl(),
   );
 
+  sl.registerLazySingleton<ARBusStopsDataSource>(
+    () => ARBusStopsDataSourceImpl(),
+  );
+
   // ========================================
   // AR VIEW - REPOSITORIES
   // ========================================
@@ -58,7 +64,10 @@ Future<void> init() async {
   );
   
   sl.registerLazySingleton<ARBusRepository>(
-    () => ARBusRepositoryImpl(dataSource: sl<ARBusDataSource>()),
+    () => ARBusRepositoryImpl(
+      dataSource: sl<ARBusDataSource>(),
+      busStopsDataSource: sl<ARBusStopsDataSource>(),
+    ),
   );
 
   // ========================================
@@ -76,6 +85,10 @@ Future<void> init() async {
     () => GetNearbyBusesUseCase(repository: sl<ARBusRepository>()),
   );
 
+  sl.registerLazySingleton<GetNearestBusStopUseCase>(
+    () => GetNearestBusStopUseCase(repository: sl<ARBusRepository>()),
+  );
+
   // ========================================
   // AR VIEW - BLOC
   // ========================================
@@ -84,6 +97,7 @@ Future<void> init() async {
       getUserLocationStream: sl<GetUserLocationStream>(),
       getNearbyBuses: sl<GetNearbyBusesUseCase>(),
       checkPermissions: sl<CheckAndRequestLocationPermissions>(),
+      getNearestBusStop: sl<GetNearestBusStopUseCase>(),
     ),
   );
 

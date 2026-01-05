@@ -81,6 +81,7 @@ class _ARViewPageState extends State<ARViewPage> {
                   ARCameraView(
                     userLocation: state.userLocation,
                     nearbyBuses: state.nearbyBuses,
+                    nearestBusStop: state.nearestBusStop,
                   ),
 
                   // Barra superior con botones
@@ -107,7 +108,7 @@ class _ARViewPageState extends State<ARViewPage> {
                               onPressed: () => Navigator.pop(context),
                             ),
                             const Text(
-                              'Vista AR - Autobuses Cercanos',
+                              'Vista AR - Paraderos Cercanos',
                               style: TextStyle(
                                 color: Colors.white,
                                 fontSize: 16,
@@ -128,6 +129,15 @@ class _ARViewPageState extends State<ARViewPage> {
                       ),
                     ),
                   ),
+
+                  // Panel de información del paradero más cercano
+                  if (state.nearestBusStop != null)
+                    Positioned(
+                      top: 120,
+                      left: 16,
+                      right: 16,
+                      child: _buildNearestBusStopCard(state.nearestBusStop!),
+                    ),
 
                   // Panel de información lateral
                   Positioned(
@@ -267,6 +277,168 @@ class _ARViewPageState extends State<ARViewPage> {
         ),
       ),
     );
+  }
+
+  Widget _buildNearestBusStopCard(dynamic busStop) {
+    // Calcular distancia aproximada
+    double distance = 0;
+    if (_arViewBloc.state is ARViewReady) {
+      final state = _arViewBloc.state as ARViewReady;
+      if (state.userLocation != null) {
+        // Implementar cálculo de Haversine simplificado
+        const earthRadiusKm = 6371;
+        final dLat = _degreesToRadians(busStop.latitude - state.userLocation!.latitude);
+        final dLng = _degreesToRadians(busStop.longitude - state.userLocation!.longitude);
+        
+        final a = (dLat / 2) * (dLat / 2) +
+            (dLng / 2) * (dLng / 2);
+        final c = 2 * (a.abs());
+        distance = earthRadiusKm * c * 1000; // en metros
+      }
+    }
+
+    final isVeryClose = distance < 100; // Menos de 100 metros
+
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: isVeryClose
+              ? [Colors.green.shade700, Colors.green.shade900]
+              : [Colors.blue.shade700, Colors.blue.shade900],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isVeryClose ? Colors.greenAccent : Colors.cyan,
+          width: 2,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: (isVeryClose ? Colors.green : Colors.cyan)
+                .withOpacity(0.5),
+            blurRadius: 20,
+            spreadRadius: 2,
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                isVeryClose ? Icons.location_on : Icons.directions_bus_filled,
+                color: isVeryClose ? Colors.greenAccent : Colors.cyan,
+                size: 24,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '🚏 ${busStop.name}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (isVeryClose)
+                      const Text(
+                        '¡PARADERO MUY CERCANO!',
+                        style: TextStyle(
+                          color: Colors.greenAccent,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.3),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '${distance.toStringAsFixed(0)} m',
+                      style: TextStyle(
+                        color: isVeryClose ? Colors.greenAccent : Colors.cyan,
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const Text(
+                      'Distancia',
+                      style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 9,
+                      ),
+                    ),
+                  ],
+                ),
+                Container(
+                  width: 1,
+                  height: 30,
+                  color: Colors.white30,
+                ),
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      busStop.routes.length.toString(),
+                      style: const TextStyle(
+                        color: Colors.lightBlue,
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const Text(
+                      'Rutas',
+                      style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 9,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Rutas: ${busStop.routes.join(", ")}',
+            style: const TextStyle(
+              color: Colors.white70,
+              fontSize: 10,
+            ),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
+
+  double _degreesToRadians(double degrees) {
+    return degrees * (3.141592653589793 / 180);
   }
 
   void _showARInfoDialog(BuildContext context, ARViewReady state) {

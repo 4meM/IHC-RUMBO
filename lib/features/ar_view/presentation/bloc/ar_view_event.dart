@@ -33,6 +33,19 @@ class UpdateNearbyBusesEvent extends ARViewEvent {
   List<Object?> get props => [userLat, userLng];
 }
 
+class UpdateNearestBusStopEvent extends ARViewEvent {
+  final double userLat;
+  final double userLng;
+
+  const UpdateNearestBusStopEvent({
+    required this.userLat,
+    required this.userLng,
+  });
+
+  @override
+  List<Object?> get props => [userLat, userLng];
+}
+
 class StopARViewEvent extends ARViewEvent {
   const StopARViewEvent();
 }
