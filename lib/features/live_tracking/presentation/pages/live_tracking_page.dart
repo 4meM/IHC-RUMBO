@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:flutter/services.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../widgets/tracking_bottom_bar.dart';
 import '../widgets/tracking_info_card.dart';
@@ -31,6 +32,7 @@ class LiveTrackingPage extends StatefulWidget {
 class _LiveTrackingPageState extends State<LiveTrackingPage> {
   GoogleMapController? _mapController;
   bool _isSiestaMode = false;
+  String? _mapStyle;
 
   // Ubicación inicial (Arequipa, Perú)
   static const LatLng _initialPosition = LatLng(-16.409047, -71.537451);
@@ -42,7 +44,12 @@ class _LiveTrackingPageState extends State<LiveTrackingPage> {
   @override
   void initState() {
     super.initState();
+    _loadMapStyle();
     _initializeMap();
+  }
+
+  Future<void> _loadMapStyle() async {
+    _mapStyle = await rootBundle.loadString('assets/map_style_minimal.json');
   }
 
   void _initializeMap() {
@@ -116,8 +123,11 @@ class _LiveTrackingPageState extends State<LiveTrackingPage> {
     }
   }
 
-  void _onMapCreated(GoogleMapController controller) {
+  void _onMapCreated(GoogleMapController controller) async {
     _mapController = controller;
+    if (_mapStyle != null) {
+      await controller.setMapStyle(_mapStyle);
+    }
   }
 
   void _onChatPressed() {

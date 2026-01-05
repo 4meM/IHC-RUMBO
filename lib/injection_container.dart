@@ -1,11 +1,17 @@
 import 'package:get_it/get_it.dart';
 import 'package:dio/dio.dart';
-import 'package:hive/hive.dart';
 
-// Core Services
-import 'core/services/local_storage_service.dart';
-import 'core/services/network_service.dart';
-import 'core/services/location_service.dart';
+// AR View Feature
+import 'features/ar_view/data/datasources/ar_location_datasource.dart';
+import 'features/ar_view/data/datasources/ar_bus_datasource.dart';
+import 'features/ar_view/data/repositories/ar_location_repository_impl.dart';
+import 'features/ar_view/data/repositories/ar_bus_repository_impl.dart';
+import 'features/ar_view/domain/repositories/ar_location_repository.dart';
+import 'features/ar_view/domain/repositories/ar_bus_repository.dart';
+import 'features/ar_view/domain/usecases/get_user_location_stream.dart';
+import 'features/ar_view/domain/usecases/get_nearby_buses_usecase.dart';
+import 'features/ar_view/domain/usecases/check_and_request_location_permissions.dart';
+import 'features/ar_view/presentation/bloc/ar_view_bloc.dart';
 
 // TODO: Importar cada feature y registrar sus dependencias
 
@@ -32,6 +38,54 @@ Future<void> init() async {
   // sl.registerLazySingleton<LocalStorageService>(() => LocalStorageServiceImpl());
   // sl.registerLazySingleton<NetworkService>(() => NetworkServiceImpl(sl()));
   // sl.registerLazySingleton<LocationService>(() => LocationServiceImpl());
+
+  // ========================================
+  // AR VIEW - DATASOURCES
+  // ========================================
+  sl.registerLazySingleton<ARLocationDataSource>(
+    () => ARLocationDataSourceImpl(),
+  );
+  
+  sl.registerLazySingleton<ARBusDataSource>(
+    () => ARBusDataSourceImpl(),
+  );
+
+  // ========================================
+  // AR VIEW - REPOSITORIES
+  // ========================================
+  sl.registerLazySingleton<ARLocationRepository>(
+    () => ARLocationRepositoryImpl(dataSource: sl<ARLocationDataSource>()),
+  );
+  
+  sl.registerLazySingleton<ARBusRepository>(
+    () => ARBusRepositoryImpl(dataSource: sl<ARBusDataSource>()),
+  );
+
+  // ========================================
+  // AR VIEW - USECASES
+  // ========================================
+  sl.registerLazySingleton<GetUserLocationStream>(
+    () => GetUserLocationStream(repository: sl<ARLocationRepository>()),
+  );
+  
+  sl.registerLazySingleton<CheckAndRequestLocationPermissions>(
+    () => CheckAndRequestLocationPermissions(repository: sl<ARLocationRepository>()),
+  );
+  
+  sl.registerLazySingleton<GetNearbyBusesUseCase>(
+    () => GetNearbyBusesUseCase(repository: sl<ARBusRepository>()),
+  );
+
+  // ========================================
+  // AR VIEW - BLOC
+  // ========================================
+  sl.registerLazySingleton<ARViewBloc>(
+    () => ARViewBloc(
+      getUserLocationStream: sl<GetUserLocationStream>(),
+      getNearbyBuses: sl<GetNearbyBusesUseCase>(),
+      checkPermissions: sl<CheckAndRequestLocationPermissions>(),
+    ),
+  );
 
   // ========================================
   // FEATURES - Cada desarrollador registra sus dependencias

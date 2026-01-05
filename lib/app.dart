@@ -6,6 +6,7 @@ import 'features/auth/presentation/pages/login_page.dart';
 import 'features/auth/presentation/pages/verify_code_page.dart';
 import 'features/trip_planner/presentation/pages/search_page.dart';
 import 'features/live_tracking/presentation/pages/live_tracking_page.dart';
+import 'features/ar_view/presentation/pages/ar_view_page.dart';
 class RumboApp extends StatelessWidget {
   const RumboApp({super.key});
 
@@ -62,6 +63,10 @@ final GoRouter _router = GoRouter(
           routePoints: extra['routePoints'] as List<LatLng>?,
         );
       },
+    ),
+    GoRoute(
+      path: '/ar-view',
+      builder: (context, state) => const ARViewPage(),
     ),
   ],
 );
