@@ -112,6 +112,14 @@ class ARBusStopsDataSourceImpl implements ARBusStopsDataSource {
       longitude: -71.611743,
       routes: ['1', '2', '3', '5', '8', '12'],
     ),
+    // Paradero de prueba para testing AR
+    ARBusStopModel(
+      id: 'stop_012',
+      name: 'Paradero Test AR',
+      latitude: -16.311653,
+      longitude: -71.612231,
+      routes: ['1', '5', '8'],
+    ),
   ];
 
   @override

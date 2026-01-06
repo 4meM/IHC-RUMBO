@@ -33,6 +33,11 @@ dependencies:
   google_maps_flutter: ^2.9.0
   http: ^1.2.0
 
+  # --- CÁMARA Y SENSORES AR ---
+  camera: ^0.10.5
+  sensors_plus: ^7.0.0
+  vector_math: ^2.1.4
+
   # --- BASE DE DATOS LOCAL ---
   hive: ^2.2.3
   hive_flutter: ^1.1.0

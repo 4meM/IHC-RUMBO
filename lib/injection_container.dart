@@ -13,6 +13,7 @@ import 'features/ar_view/domain/usecases/get_user_location_stream.dart';
 import 'features/ar_view/domain/usecases/get_nearby_buses_usecase.dart';
 import 'features/ar_view/domain/usecases/get_nearest_bus_stop_usecase.dart';
 import 'features/ar_view/domain/usecases/check_and_request_location_permissions.dart';
+import 'features/ar_view/domain/usecases/start_location_updates_usecase.dart';
 import 'features/ar_view/presentation/bloc/ar_view_bloc.dart';
 
 // TODO: Importar cada feature y registrar sus dependencias
@@ -80,6 +81,10 @@ Future<void> init() async {
   sl.registerLazySingleton<CheckAndRequestLocationPermissions>(
     () => CheckAndRequestLocationPermissions(repository: sl<ARLocationRepository>()),
   );
+
+  sl.registerLazySingleton<StartLocationUpdatesUseCase>(
+    () => StartLocationUpdatesUseCase(repository: sl<ARLocationRepository>()),
+  );
   
   sl.registerLazySingleton<GetNearbyBusesUseCase>(
     () => GetNearbyBusesUseCase(repository: sl<ARBusRepository>()),
@@ -98,6 +103,7 @@ Future<void> init() async {
       getNearbyBuses: sl<GetNearbyBusesUseCase>(),
       checkPermissions: sl<CheckAndRequestLocationPermissions>(),
       getNearestBusStop: sl<GetNearestBusStopUseCase>(),
+      startLocationUpdates: sl<StartLocationUpdatesUseCase>(),
     ),
   );
 

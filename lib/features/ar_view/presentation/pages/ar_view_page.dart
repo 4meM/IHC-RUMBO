@@ -4,6 +4,7 @@ import '../../../../core/constants/app_colors.dart';
 import '../../../../injection_container.dart';
 import '../bloc/ar_view_bloc.dart';
 import '../widgets/ar_camera_view.dart';
+import '../widgets/ar_camera_live.dart';
 
 class ARViewPage extends StatefulWidget {
   const ARViewPage({Key? key}) : super(key: key);
@@ -14,6 +15,7 @@ class ARViewPage extends StatefulWidget {
 
 class _ARViewPageState extends State<ARViewPage> {
   late ARViewBloc _arViewBloc;
+  bool _useLiveCamera = true; // Cambiar entre vista simulada y en vivo
 
   @override
   void initState() {
@@ -75,14 +77,22 @@ class _ARViewPageState extends State<ARViewPage> {
                 ),
               );
             } else if (state is ARViewReady) {
+              print('[AR PAGE] Rendering ARViewReady: userLocation=${state.userLocation}, nearestBusStop=${state.nearestBusStop?.name}');
               return Stack(
                 children: [
-                  // Vista AR principal
-                  ARCameraView(
-                    userLocation: state.userLocation,
-                    nearbyBuses: state.nearbyBuses,
-                    nearestBusStop: state.nearestBusStop,
-                  ),
+                  // Vista AR principal - Elegir entre cámara en vivo o simulada
+                  if (_useLiveCamera)
+                    ARCameraLive(
+                      userLocation: state.userLocation,
+                      nearbyBuses: state.nearbyBuses,
+                      nearestBusStop: state.nearestBusStop,
+                    )
+                  else
+                    ARCameraView(
+                      userLocation: state.userLocation,
+                      nearbyBuses: state.nearbyBuses,
+                      nearestBusStop: state.nearestBusStop,
+                    ),
 
                   // Barra superior con botones
                   Positioned(
@@ -107,13 +117,32 @@ class _ARViewPageState extends State<ARViewPage> {
                               ),
                               onPressed: () => Navigator.pop(context),
                             ),
-                            const Text(
-                              'Vista AR - Paraderos Cercanos',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
+                            Expanded(
+                              child: Text(
+                                _useLiveCamera ? 'AR Real (Cámara)' : 'AR Simulado',
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
+                            ),
+                            IconButton(
+                              icon: Icon(
+                                _useLiveCamera
+                                    ? Icons.videocam
+                                    : Icons.videocam_off,
+                                color: _useLiveCamera
+                                    ? Colors.greenAccent
+                                    : Colors.cyan,
+                              ),
+                              tooltip: 'Cambiar vista',
+                              onPressed: () {
+                                setState(() {
+                                  _useLiveCamera = !_useLiveCamera;
+                                });
+                              },
                             ),
                             IconButton(
                               icon: const Icon(
