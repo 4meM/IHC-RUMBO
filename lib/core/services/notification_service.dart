@@ -1,6 +1,8 @@
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'helpers/notification_helpers.dart';
+import '../utils/clipboard_helper.dart';
 
 class NotificationService {
   static final NotificationService _instance = NotificationService._internal();
@@ -10,99 +12,97 @@ class NotificationService {
   final FlutterLocalNotificationsPlugin _notifications = FlutterLocalNotificationsPlugin();
 
   Future<void> initialize() async {
-    const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
-    const initSettings = InitializationSettings(
-      android: androidSettings,
-    );
+    final initSettings = createInitializationSettings();
     
-    // Configurar callback para manejar acciones de notificación
     await _notifications.initialize(
       initSettings,
       onDidReceiveNotificationResponse: _onNotificationTap,
     );
     
-    // Solicitar permisos para Android 13+
-    await _notifications
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-        ?.requestNotificationsPermission();
-    
-    // Crear canal de notificaciones
-    const androidChannel = AndroidNotificationChannel(
-      'sms_channel',
-      'Mensajes SMS',
-      description: 'Notificaciones de códigos de verificación',
-      importance: Importance.high,
-      playSound: true,
-      enableVibration: true,
-    );
-    
-    await _notifications
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(androidChannel);
+    await _requestPermissions();
+    await _createAllChannels();
         
     if (kDebugMode) {
       print('NotificationService inicializado correctamente');
     }
   }
 
-  void _onNotificationTap(NotificationResponse response) {
-    if (response.actionId == 'copy_code') {
-      final code = response.payload;
-      if (code != null) {
-        Clipboard.setData(ClipboardData(text: code));
-        if (kDebugMode) {
-          print('Código copiado al portapapeles: $code');
-        }
+  Future<void> _requestPermissions() async {
+    await _notifications
+        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+        ?.requestNotificationsPermission();
+  }
+
+  Future<void> _createAllChannels() async {
+    final plugin = _notifications
+        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+    
+    if (plugin != null) {
+      for (final channel in getAllChannels()) {
+        await plugin.createNotificationChannel(channel);
+      }
+    }
+  }
+
+  void _onNotificationTap(NotificationResponse response) async {
+    if (response.actionId == 'copy_code' && response.payload != null) {
+      await copyToClipboard(response.payload!);
+      if (kDebugMode) {
+        print('Código copiado al portapapeles: ${response.payload}');
       }
     }
   }
 
   Future<void> showSMSNotification(String code) async {
-    final androidDetails = AndroidNotificationDetails(
-      'sms_channel',
-      'Mensajes SMS',
-      channelDescription: 'Notificaciones de códigos de verificación',
-      importance: Importance.max,
-      priority: Priority.high,
-      showWhen: true,
-      playSound: true,
-      enableVibration: true,
-      largeIcon: const DrawableResourceAndroidBitmap('@mipmap/ic_launcher'),
-      styleInformation: BigTextStyleInformation(
-        'Tu código RUMBO es: $code\n\nToca "Copiar código" abajo para copiarlo.',
-        htmlFormatBigText: false,
-        contentTitle: 'Código de verificación RUMBO',
-        summaryText: 'RUMBO',
-      ),
-      actions: <AndroidNotificationAction>[
-        AndroidNotificationAction(
-          'copy_code',
-          'Copiar código',
-          showsUserInterface: false,
-          cancelNotification: false,
-        ),
-      ],
-      category: AndroidNotificationCategory.message,
-      fullScreenIntent: false,
-    );
-
-    final notificationDetails = NotificationDetails(android: androidDetails);
+    final androidDetails = createSMSNotificationDetails(code);
+    final notificationDetails = wrapNotificationDetails(androidDetails);
 
     await _notifications.show(
-      0,
-      'Código de verificación RUMBO',
+      getSMSNotificationId(),
+      getNotificationTitle('sms'),
       'Tu código es: $code - Toca para expandir',
       notificationDetails,
       payload: code,
     );
     
-    // Copiar al portapapeles con formato (guión en medio)
-    final formattedCode = '${code.substring(0, 3)}-${code.substring(3)}';
-    await Clipboard.setData(ClipboardData(text: formattedCode));
+    final formattedCode = formatVerificationCode(code);
+    await copyToClipboard(formattedCode);
     
     if (kDebugMode) {
       print('Notificación enviada con código: $code');
       print('Código copiado al portapapeles: $formattedCode');
     }
+  }
+
+  Future<void> showProximityAlert(String stopName, int meters) async {
+    final androidDetails = createProximityAlertDetails(stopName, meters);
+    final notificationDetails = wrapNotificationDetails(androidDetails);
+
+    await _notifications.show(
+      getProximityNotificationId(),
+      getNotificationTitle('proximity'),
+      'Estás cerca de: $stopName',
+      notificationDetails,
+    );
+  }
+
+  Future<void> showBackgroundServiceNotification(String text) async {
+    final androidDetails = createBackgroundServiceDetails(text);
+    final notificationDetails = wrapNotificationDetails(androidDetails);
+
+    await _notifications.show(
+      getBackgroundServiceNotificationId(),
+      getNotificationTitle('background'),
+      'Servicio activo',
+      notificationDetails,
+    );
+  }
+
+  Future<void> cancelNotification(int id) async {
+    await _notifications.cancel(id);
+  }
+
+  Future<void> cancelAll() async {
+    await _notifications.cancelAll();
   }
 }

@@ -13,6 +13,7 @@ dependencies:
   # --- GESTIÓN DE ESTADO ---
   flutter_bloc: ^8.1.6
   bloc: ^8.1.4
+  provider: ^6.1.2
 
   # --- INYECCIÓN DE DEPENDENCIAS ---
   get_it: ^7.7.0
@@ -74,6 +75,7 @@ flutter:
     - assets/map_style_minimal.json
     - assets/data-buses/export.geojson
     - assets/images/ico_bus.png
+    - assets/images/bus_icon.png
 
   # fonts:
   #   - family: Montserrat

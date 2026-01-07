@@ -1,19 +1,20 @@
 import 'dart:convert';
-import 'dart:math';
 import 'package:flutter/services.dart';
-import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../models/bus_route_model.dart';
+import '../helpers/geojson_parser_helper.dart';
+import '../helpers/route_calculation_helper.dart';
+import '../../../../core/utils/geometry_utils.dart';
 
 // Clase para almacenar ruta con información de proximidad
 class RouteWithScore {
   final RouteGroup route;
-  final double distanceToOrigin; // Metros caminando hasta la ruta
-  final double distanceToDestination; // Metros desde la ruta al destino
-  final double routeDistance; // Metros en el bus (siguiendo la ruta)
-  final double totalScore; // Score total (menor es mejor)
-  final LatLng? pickupPoint; // Punto de recogida más cercano
-  final LatLng? dropoffPoint; // Punto de bajada más cercano
+  final double distanceToOrigin;
+  final double distanceToDestination;
+  final double routeDistance;
+  final double totalScore;
+  final LatLng? pickupPoint;
+  final LatLng? dropoffPoint;
   
   RouteWithScore({
     required this.route,
@@ -25,27 +26,272 @@ class RouteWithScore {
     this.dropoffPoint,
   });
   
-  // Distancia total caminando (origen a ruta + ruta a destino)
   double get totalWalkingDistance => distanceToOrigin + distanceToDestination;
+  bool get isDirectRoute => totalScore < 1000;
   
-  bool get isDirectRoute => totalScore < 1000; // Menos de 1km total caminando
-  
-  // Formatear distancias para mostrar al usuario
   String get walkingDistanceText {
-    final total = totalWalkingDistance;
-    if (total < 1000) {
-      return '${total.toStringAsFixed(0)}m caminando';
-    }
-    return '${(total / 1000).toStringAsFixed(1)}km caminando';
+    return formatDistance(totalWalkingDistance);
   }
   
   String get busDistanceText {
-    if (routeDistance < 1000) {
-      return '${routeDistance.toStringAsFixed(0)}m en bus';
-    }
-    return '${(routeDistance / 1000).toStringAsFixed(1)}km en bus';
+    return formatDistance(routeDistance);
   }
 }
+
+class RouteGroup {
+  final String ref;
+  final BusRouteModel? outbound;
+  final BusRouteModel? return_;
+  
+  late final LatLngBounds bounds;
+  late final LatLng centerPoint;
+  late final List<LatLng> allPoints;
+  
+  RouteGroup({
+    required this.ref,
+    this.outbound,
+    this.return_,
+  }) {
+    _calculateSpatialInfo();
+  }
+  
+  void _calculateSpatialInfo() {
+    allPoints = [
+      if (outbound != null) ...outbound!.coordinates,
+      if (return_ != null) ...return_!.coordinates,
+    ];
+    
+    if (allPoints.isEmpty) return;
+    bounds = calculateBounds(allPoints);
+    centerPoint = calculateCentroid(allPoints);
+  }
+  
+  double getMinDistanceToPoint(LatLng point) {
+    if (allPoints.isEmpty) return double.infinity;
+    final result = findClosestPoint(point, allPoints);
+    return result.distance;
+  }
+  
+  LatLng? getClosestPointTo(LatLng point) {
+    if (allPoints.isEmpty) return null;
+    final result = findClosestPoint(point, allPoints);
+    return result.point;
+  }
+  
+  int? getClosestPointIndexTo(LatLng point) {
+    if (allPoints.isEmpty) return null;
+    return findClosestPointIndex(point, allPoints);
+  }
+  
+  double? getRouteDistanceBetweenPoints(LatLng from, LatLng to) {
+    final fromIndex = getClosestPointIndexTo(from);
+    final toIndex = getClosestPointIndexTo(to);
+    
+    if (fromIndex == null || toIndex == null || toIndex <= fromIndex) {
+      return null;
+    }
+    
+    return calculateDistanceBetweenIndices(fromIndex, toIndex, allPoints);
+  }
+  
+  bool passesNear(LatLng point, double radiusMeters) {
+    return getMinDistanceToPoint(point) <= radiusMeters;
+  }
+  
+  String get displayName => outbound?.ref ?? return_?.ref ?? ref;
+  
+  Set<Polyline> toPolylines() {
+    final polylines = <Polyline>{};
+    
+    if (outbound != null && return_ != null) {
+      final circuitPoints = <LatLng>[
+        ...outbound!.coordinates,
+        ...return_!.coordinates,
+      ];
+      
+      polylines.add(
+        Polyline(
+          polylineId: PolylineId('${ref}_circuit'),
+          points: circuitPoints,
+          color: outbound!.color,
+          width: 3,
+          startCap: Cap.roundCap,
+          endCap: Cap.roundCap,
+          jointType: JointType.round,
+        ),
+      );
+    } else if (outbound != null) {
+      polylines.add(
+        Polyline(
+          polylineId: PolylineId('${outbound!.id}_single'),
+          points: outbound!.coordinates,
+          color: outbound!.color,
+          width: 3,
+          startCap: Cap.roundCap,
+          endCap: Cap.roundCap,
+          jointType: JointType.round,
+        ),
+      );
+    } else if (return_ != null) {
+      polylines.add(
+        Polyline(
+          polylineId: PolylineId('${return_!.id}_single'),
+          points: return_!.coordinates,
+          color: return_!.color,
+          width: 3,
+          startCap: Cap.roundCap,
+          endCap: Cap.roundCap,
+          jointType: JointType.round,
+        ),
+      );
+    }
+    
+    return polylines;
+  }
+}
+
+class GeoJsonParserService {
+  List<RouteGroup>? _cachedRoutes;
+  
+  Future<List<BusRouteModel>> loadBusRoutes() async {
+    try {
+      print('📍 Cargando rutas de buses desde GeoJSON...');
+      
+      final jsonString = await loadGeoJsonFromAssets('assets/data-buses/export.geojson');
+      final features = extractFeatures(jsonString);
+      
+      print('📍 Total de features encontradas: ${features.length}');
+      
+      final routes = features.map((feature) {
+        try {
+          return BusRouteModel.fromGeoJson(feature);
+        } catch (e) {
+          print('⚠️ Error parseando ruta: $e');
+          return null;
+        }
+      }).whereType<BusRouteModel>().toList();
+      
+      print('✅ ${routes.length} rutas cargadas exitosamente');
+      
+      return routes;
+    } catch (e) {
+      print('❌ Error cargando GeoJSON: $e');
+      return [];
+    }
+  }
+  
+  Future<List<RouteGroup>> loadGroupedRoutes() async {
+    if (_cachedRoutes != null) {
+      print('📦 Usando rutas en cache: ${_cachedRoutes!.length}');
+      return _cachedRoutes!;
+    }
+    
+    final routes = await loadBusRoutes();
+    final groupedByRef = groupFeaturesByRef(routes);
+    final groups = <RouteGroup>[];
+    
+    groupedByRef.forEach((ref, routeList) {
+      if (routeList.length >= 2) {
+        final outbound = routeList[0];
+        final returnRoute = routeList[1];
+        
+        final startPoint = outbound.coordinates.first;
+        final endPoint = returnRoute.coordinates.last;
+        final distance = calculateDistance(startPoint, endPoint);
+        
+        if (distance < 500) {
+          groups.add(RouteGroup(
+            ref: ref,
+            outbound: outbound,
+            return_: returnRoute,
+          ));
+          print('✅ Circuito válido: $ref - Distancia cierre: ${distance.toStringAsFixed(0)}m');
+        } else {
+          print('❌ Circuito abierto descartado: $ref - Distancia: ${distance.toStringAsFixed(0)}m');
+        }
+      } else if (routeList.length == 1) {
+        groups.add(RouteGroup(
+          ref: ref,
+          outbound: routeList[0],
+        ));
+      }
+    });
+    
+    print('✅ ${groups.length} rutas válidas (circuitos cerrados)');
+    _cachedRoutes = groups;
+    return groups;
+  }
+  
+  Future<List<RouteWithScore>> findBestRoutes({
+    required LatLng origin,
+    required LatLng destination,
+    double maxWalkingDistanceMeters = 500,
+  }) async {
+    final allRoutes = await loadGroupedRoutes();
+    final routesWithScore = <RouteWithScore>[];
+    
+    for (final route in allRoutes) {
+      final distanceToOrigin = route.getMinDistanceToPoint(origin);
+      final distanceToDestination = route.getMinDistanceToPoint(destination);
+      
+      if (distanceToOrigin > maxWalkingDistanceMeters || 
+          distanceToDestination > maxWalkingDistanceMeters) {
+        continue;
+      }
+      
+      final pickupPoint = route.getClosestPointTo(origin);
+      final dropoffPoint = route.getClosestPointTo(destination);
+      
+      if (pickupPoint == null || dropoffPoint == null) continue;
+      
+      final routeDistance = route.getRouteDistanceBetweenPoints(pickupPoint, dropoffPoint);
+      
+      if (routeDistance == null) {
+        print('❌ Ruta ${route.ref} descartada: destino está atrás en el recorrido');
+        continue;
+      }
+      
+      final score = calculateRouteScore(
+        walkDistanceToPickup: distanceToOrigin,
+        walkDistanceFromDropoff: distanceToDestination,
+        busDistance: routeDistance,
+      );
+      
+      routesWithScore.add(RouteWithScore(
+        route: route,
+        distanceToOrigin: distanceToOrigin,
+        distanceToDestination: distanceToDestination,
+        routeDistance: routeDistance,
+        totalScore: score,
+        pickupPoint: pickupPoint,
+        dropoffPoint: dropoffPoint,
+      ));
+    }
+    
+    routesWithScore.sort((a, b) => a.totalScore.compareTo(b.totalScore));
+    
+    print('🔍 Encontradas ${routesWithScore.length} rutas válidas (dirección correcta)');
+    return routesWithScore;
+  }
+  
+  Future<BusRouteModel?> getRouteById(String id) async {
+    final routes = await loadBusRoutes();
+    try {
+      return routes.firstWhere((route) => route.id == id);
+    } catch (e) {
+      return null;
+    }
+  }
+  
+  Future<List<BusRouteModel>> searchRoutesByName(String query) async {
+    final routes = await loadBusRoutes();
+    return routes.where((route) {
+      return route.name.toLowerCase().contains(query.toLowerCase()) ||
+             route.ref.toLowerCase().contains(query.toLowerCase());
+    }).toList();
+  }
+}
+
 
 class RouteGroup {
   final String ref;

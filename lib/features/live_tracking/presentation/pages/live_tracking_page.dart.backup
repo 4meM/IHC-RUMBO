@@ -1,0 +1,443 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:provider/provider.dart';
+import 'dart:async';
+import 'dart:math';
+import '../../../../core/constants/app_colors.dart';
+import '../../data/helpers/tracking_marker_helper.dart';
+import '../../data/helpers/tracking_calculation_helper.dart';
+import '../../data/helpers/tracking_polyline_helper.dart';
+import '../controllers/tracking_controller.dart';
+import '../widgets/tracking_bottom_bar.dart';
+import '../widgets/tracking_info_card.dart';
+import '../widgets/chat_bottom_sheet.dart';
+import '../widgets/sos_bottom_sheet.dart';
+import '../widgets/info_bottom_sheet.dart';
+
+/// ============================================
+/// LIVE TRACKING PAGE - REFACTORIZADO
+/// De 615 líneas → ~180 líneas
+/// Usando helpers, controller y widgets modulares
+/// ============================================
+
+class LiveTrackingPage extends StatefulWidget {
+  final String busNumber;
+  final String routeName;
+  final LatLng? origin;
+  final LatLng? destination;
+  final List<LatLng>? routePoints;
+  final LatLng? initialBusPosition;
+  final LatLng? pickupPoint;
+  final LatLng? dropoffPoint;
+
+  const LiveTrackingPage({
+    super.key,
+    required this.busNumber,
+    required this.routeName,
+    this.origin,
+    this.destination,
+    this.routePoints,
+    this.initialBusPosition,
+    this.pickupPoint,
+    this.dropoffPoint,
+  });
+
+  @override
+  State<LiveTrackingPage> createState() => _LiveTrackingPageState();
+}
+
+class _LiveTrackingPageState extends State<LiveTrackingPage> {
+  late TrackingController _controller;
+  String? _mapStyle;
+  Timer? _busSimulationTimer;
+  
+  // Lista de buses en simulación
+  final List<_BusSimulation> _buses = [];
+  static const int _totalBuses = 10;
+
+  // Ubicación inicial (Arequipa, Perú) - fallback
+  static const LatLng _defaultPosition = LatLng(-16.409047, -71.537451);
+
+  @override
+    _initializeBusSimulation();
+  void initState() {
+    super.initState();
+    _controller = TrackingController();
+    _loadMapStyle();
+    _initializeTracking();
+  }
+
+  Future<void> _loadMapStyle() async {
+    _mapStyle = await rootBundle.loadString('assets/map_style_minimal.json');
+  }
+
+  /// Inicializar tracking con datos reales o defaults
+  void _initializeTracking() {
+    // Configurar datos básicos
+    _controller.setBusNumber(widget.busNumber);
+    _controller.setRouteName(widget.routeName);
+
+    // Usar datos reales de la ruta si están disponibles
+    final userPos = widget.origin ?? _defaultPosition;
+    final busPos = widget.initialBusPosition ?? const LatLng(-16.405, -71.535);
+    final origin = widget.origin ?? userPos;
+    final destination = widget.destination ?? const LatLng(-16.400, -71.530);
+    final routePoints = widget.routePoints ?? [userPos, busPos, destination];
+
+    _controller.setUserPosition(userPos);
+    _controller.setBusPosition(busPos);
+    _controller.setOrigin(origin);
+    _controller.setDestination(destination);
+    _controller.setRoutePoints(routePoints);
+
+    // Crear marcadores usando helper (incluye pickup y dropoff amarillos)
+    final markers = createTrackingMarkers(
+      userPosition: userPos,
+      busPosition: busPos,
+      origin: origin,
+      destination: destination,
+      busNumber: widget.busNumber,
+      pickupPoint: widget.pickupPoint,
+      dropoffPoint: widget.dropoffPoint,
+    );
+    _controller.setMarkers(markers);
+
+    // Crear polylines (ruta del bus + caminar entrecortado)
+    final walkToPickup = widget.pickupPoint != null 
+        ? [origin, widget.pickupPoint!] 
+        : null;
+    final walkToDestination = widget.dropoffPoint != null 
+        ? [widget.dropoffPoint!, destination] 
+        : null;
+    
+    final polylines = createTrackingPolylines(
+      busRoute: routePoints,
+      walkToPickup: walkToPickup,
+      walkToDestination: walkToDestination,
+    );
+    _controller.setPolylines(polylines);
+
+    // Calcular información usando helpers
+   
+  
+  /// Inicializar simulación de múltiples buses
+  void _initializeBusSimulation() {
+    final routePoints = _controller.routePoints;
+    if (routePoints == null || routePoints.isEmpty) return;
+    
+    // Crear 10 buses con separación en la ruta
+    final separationPercent = 1.0 / _totalBuses;
+    for (int i = 0; i < _totalBuses; i++) {
+      _buses.add(_BusSimulation(
+        id: 'bus_$i',
+        routeProgress: (i * separationPercent) % 1.0,
+        speed: 0.002 + (Random().nextDouble() * 0.001), // Velocidad variable
+      ));
+    }
+    
+    // Timer para actualizar posiciones cada 100ms
+    _busSimulationTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
+      if (!mounted) return;
+      _updateBusPositions();
+    });
+  }
+  
+  /// Actualizar posiciones de todos los buses
+  void _updateBusPositions() {
+    final routePoints = _controller.routePoints;
+    if (routePoints == null || routePoints.isEmpty) return;
+    
+    final markers = <Marker>{};
+    
+    // Agregar marcadores de usuario, origen, destino, pickup y dropoff
+    if (_controller.userPosition != null) {
+      markers.add(createUserMarker(_controller.userPosition!));
+    }
+    if (_controller.origin != null) {
+      markers.add(Marker(
+        markerId: const MarkerId('origin'),
+        position: _controller.origin!,
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+      ));
+    }
+    if (_controller.destination != null) {
+      markers.add(Marker(
+        markerId: const MarkerId('destination'),
+        position: _controller.destination!,
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+      ));
+    }
+    if (widget.pickupPoint != null) {
+      markers.add(Marker(
+        markerId: const MarkerId('pickup'),
+        position: widget.pickupPoint!,
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueYellow),
+      ));
+    }
+    if (widget.dropoffPoint != null) {
+      markers.add(Marker(
+        markerId: const MarkerId('dropoff'),
+        position: widget.dropoffPoint!,
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueYellow),
+      ));
+    }
+    
+    // Actualizar y agregar cada bus
+    LatLng? closestBusPosition;
+    double? closestDistance;
+    
+    for (var bus in _buses) {
+      // Avanzar el bus
+      bus.routeProgress = (bus.routeProgress + bus.speed) % 1.0;
+      
+      // Calcular posición en la ruta
+      final position = _getPositionOnRoute(routePoints, bus.routeProgress);
+      
+      // Agregar marcador del bus
+      markers.add(Marker(
+        markerId: MarkerId(bus.id),
+        position: position,
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+        rotation: _calculateBearing(routePoints, bus.routeProgress),
+        anchor: const Offset(0.5, 0.5),
+      ));
+      
+      // Encontrar el bus más cercano al usuario
+      if (_controller.userPosition != null) {
+        final distance = calculateDistanceInKm(_controller.userPosition!, position);
+        if (closestDistance == null || distance < closestDistance) {
+          closestDistance = distance;
+          closestBusPosition = position;
+        }
+      }
+    }
+    
+    // Actualizar el bus principal (el más cercano)
+    if (closestBusPosition != null) {
+      _controller.setBusPosition(closestBusPosition);
+      _updateTrackingInfo();
+    }
+    
+    _controller.setMarkers(markers);
+  }
+  
+  /// Obtener posición en la ruta basado en el progreso (0.0 a 1.0)
+  LatLng _getPositionOnRoute(List<LatLng> route, double progress) {
+    final totalDistance = _calculateTotalDistance(route);
+    final targetDistance = totalDistance * progress;
+    
+    double accumulatedDistance = 0.0;
+    for (int i = 0; i < route.length - 1; i++) {
+      final segmentDistance = calculateDistanceInKm(route[i], route[i + 1]) * 1000;
+      if (accumulatedDistance + segmentDistance >= targetDistance) {
+        final ratio = (targetDistance - accumulatedDistance) / segmentDistance;
+        return LatLng(
+          route[i].latitude + (route[i + 1].latitude - route[i].latitude) * ratio,
+          route[i].longitude + (route[i + 1].longitude - route[i].longitude) * ratio,
+        );
+      }
+      accumulatedDistance += segmentDistance;
+    }
+    return route.last;
+  }
+  
+  /// Calcular distancia total de la ruta
+  double _calculateTotalDistance(List<LatLng> route) {
+    double total = 0.0;
+    for (int i = 0; i < route.length - 1; i++) {
+      total += calculateDistanceInKm(route[i], route[i + 1]) * 1000;
+    }
+    return total;
+  }
+  
+  /// Calcular rotación del bus basado en la dirección
+  double _calculateBearing(List<LatLng> route, double progress) {
+    final position = _getPositionOnRoute(route, progress);
+    final nextProgress = (progress + 0.01) % 1.0;
+    final nextPosition = _getPositionOnRoute(route, nextProgress);
+    
+    final dLat = nextPosition.latitude - position.latitude;
+    final dLng = nextPosition.longitude - position.longitude;
+    return atan2(dLng, dLat) * 180 / pi;
+  } _updateTrackingInfo();
+  }
+
+  /// Actualizar información de tracking (distancia, tiempo)
+  void _updateTrackingInfo() {
+    if (_controller.userPosition == null || _controller.busPosition == null) {
+      return;
+    }
+
+    final distanceKm = calculateDistanceInKm(
+      _controller.userPosition!,
+      _controller.busPosition!,
+    );
+    final minutes = calculateEstimatedMinutes(distanceKm);
+    final arrivalTime = formatEstimatedArrivalTime(minutes);
+
+    _controller.setDistanceToBus('$distanceKm Km');
+    _controller.setEstimatedArrivalTime(arrivalTime);
+  }
+
+  void _onMapCreated(GoogleMapController controller) {
+    if (_mapStyle != null) {
+     busSimulationTimer?.cancel();
+    _controller.dispose();
+    super.dispose();
+  }
+}
+
+/// Clase auxiliar para simulación de buses
+class _BusSimulation {
+  final String id;
+  double routeProgress; // 0.0 a 1.0
+  final double speed;
+  
+  _BusSimulation({
+    required this.id,
+    required this.routeProgress,
+    required this.speed,
+  }); _controller.setMapController(controller);
+  }
+
+  void _onChatPressed() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => const ChatBottomSheet(),
+    );
+  }
+
+  void _onSOSPressed() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => SOSBottomSheet(
+        onNotificationShow: _showTopNotification,
+      ),
+    );
+  }
+
+  void _onSiestaToggled() {
+    _controller.toggleSiestaMode();
+
+    final message = _controller.isSiestaMode
+        ? 'Alarma activada'
+        : 'Alarma desactivada';
+    final icon = _controller.isSiestaMode ? Icons.alarm_on : Icons.alarm_off;
+    final color = _controller.isSiestaMode
+        ? AppColors.success
+        : AppColors.textSecondary;
+
+    _showTopNotification(message, icon, color: color);
+  }
+
+  void _onInfoPressed() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => InfoBottomSheet(
+        busNumber: widget.busNumber,
+        routeName: widget.routeName,
+      ),
+    );
+  }
+
+  void _showTopNotification(String message, IconData icon, {Color? color}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: Colors.white, size: 24),
+            const SizedBox(width: 12),
+            Text(
+              message,
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+            ),
+          ],
+        ),
+        backgroundColor: color ?? AppColors.success,
+        duration: const Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.only(top: 80, left: 20, right: 20),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ChangeNotifierProvider.value(
+      value: _controller,
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text('Bus ${widget.busNumber}'),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.notifications_outlined),
+              onPressed: () {},
+            ),
+          ],
+        ),
+        body: Consumer<TrackingController>(
+          builder: (context, controller, child) {
+            return Stack(
+              children: [
+                // Mapa
+                GoogleMap(
+                  onMapCreated: _onMapCreated,
+                  initialCameraPosition: CameraPosition(
+                    target: controller.userPosition ?? _defaultPosition,
+                    zoom: 14.0,
+                  ),
+                  markers: controller.markers,
+                  polylines: controller.polylines,
+                  myLocationEnabled: true,
+                  myLocationButtonEnabled: true,
+                  zoomControlsEnabled: false,
+                  mapToolbarEnabled: false,
+                ),
+
+                // Tarjeta de información superior
+                Positioned(
+                  bottom: 160,
+                  left: 16,
+                  right: 16,
+                  child: TrackingInfoCard(
+                    arrivalTime: controller.estimatedArrivalTime,
+                    distance: controller.distanceToBus,
+                    busNumber: widget.busNumber,
+                  ),
+                ),
+
+                // Barra inferior con botones
+                Positioned(
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                  child: TrackingBottomBar(
+                    isSiestaMode: controller.isSiestaMode,
+                    onChatPressed: _onChatPressed,
+                    onSOSPressed: _onSOSPressed,
+                    onSiestaToggled: _onSiestaToggled,
+                    onInfoPressed: _onInfoPressed,
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+}

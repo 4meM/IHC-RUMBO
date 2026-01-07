@@ -7,8 +7,13 @@ class SearchPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      body: MapPreview(), // Aquí se muestra el mapa directamente
+    // Usar la key del SearchPage para propagar a MapPreview
+    // Esto fuerza la recreación completa del árbol de widgets
+    return Scaffold(
+      resizeToAvoidBottomInset: false,
+      body: SafeArea(
+        child: MapPreview(key: key),
+      ),
     );
   }
 }

@@ -1,14 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:geolocator/geolocator.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 import '../../../../core/constants/app_colors.dart';
-import '../../data/models/bus_route_model.dart';
-import '../../data/services/geojson_parser_service.dart';
+import '../../../../core/utils/geometry_utils.dart';
+import '../controllers/map_controller.dart' as controller;
+import 'search_input_field.dart';
+import 'place_suggestions_list.dart';
+import 'map_search_bar.dart';
+import 'map_action_button.dart';
+import 'route_info_card.dart';
+import 'map_loading_overlay.dart';
 import 'route_navigation_controls.dart';
+import 'start_tracking_button.dart';
 
+/// Widget principal: Mapa con búsqueda de rutas
+/// Propósito único: Renderizar el mapa y coordinar la UI con el MapController
 class MapPreview extends StatefulWidget {
   const MapPreview({super.key});
 
@@ -16,872 +22,253 @@ class MapPreview extends StatefulWidget {
   State<MapPreview> createState() => _MapPreviewState();
 }
 
-enum SelectionPhase { origin, destination, completed }
-
 class _MapPreviewState extends State<MapPreview> {
-  GoogleMapController? mapController;
-  final LatLng _defaultCenter = const LatLng(-16.409, -71.537);
-  
-  LatLng? _currentPosition;
-  LatLng? _originPosition;
-  LatLng? _destinationPosition;
-  
-  bool _isLoading = true;
-  String? _errorMessage;
+  late final controller.MapController _controller;
   String? _mapStyle;
   
-  SelectionPhase _phase = SelectionPhase.origin;
-  
-  final TextEditingController _originController = TextEditingController();
-  final TextEditingController _destinationController = TextEditingController();
-  
-  Set<Marker> _markers = {};
-  
-  List<Map<String, dynamic>> _originSuggestions = [];
-  List<Map<String, dynamic>> _destinationSuggestions = [];
-  bool _showOriginSuggestions = false;
-  bool _showDestinationSuggestions = false;
-  bool _isSelectingOrigin = false;
-  bool _isSelectingDestination = false;
-  
-  final String _googleApiKey = 'AIzaSyABjCnncfqwu10vFn3BT7KWTLAewEgOl3I';
-  
-  // Rutas de buses
-  final GeoJsonParserService _geoJsonService = GeoJsonParserService();
-  List<RouteGroup> _routeGroups = [];
-  List<RouteWithScore> _routeScores = [];
-  int _currentRouteIndex = 0;
-  bool _showRouteNavigation = false;
-  Set<Polyline> _polylines = {};
-  
-  bool get _canContinue => 
-    _originPosition != null && _destinationPosition != null;
-
   @override
   void initState() {
     super.initState();
+    _controller = controller.MapController();
     _loadMapStyle();
-    _initializeLocation();
-    // No cargar todas las rutas al inicio, solo cuando se busque
-    _originController.text = 'Tu Ubicación';
-    
-    _originController.addListener(() {
-      final text = _originController.text;
-      if (!_isSelectingOrigin && text.isNotEmpty && text != 'Tu Ubicación' && text != 'Ubicación seleccionada') {
-        setState(() {
-          _showOriginSuggestions = true;
-        });
-        _searchPlaces(text, isOrigin: true);
-      } else if (text.isEmpty) {
-        setState(() {
-          _showOriginSuggestions = false;
-          _originSuggestions.clear();
-        });
+    _controller.initialize().then((_) {
+      if (_controller.errorMessage != null && mounted) {
+        _showSnackBar(_controller.errorMessage!, isError: true);
       }
     });
     
-    _destinationController.addListener(() {
-      final text = _destinationController.text;
-      if (!_isSelectingDestination && text.isNotEmpty && text != 'Ubicación seleccionada') {
-        setState(() {
-          _showDestinationSuggestions = true;
-        });
-        _searchPlaces(text, isOrigin: false);
-      } else if (text.isEmpty) {
-        setState(() {
-          _showDestinationSuggestions = false;
-          _destinationSuggestions.clear();
-        });
-      }
-    });
+    _controller.addListener(_onControllerUpdate);
+    _controller.originController.addListener(_onOriginTextChanged);
+    _controller.destinationController.addListener(_onDestinationTextChanged);
   }
 
   @override
   void dispose() {
-    _originController.dispose();
-    _destinationController.dispose();
+    _controller.originController.removeListener(_onOriginTextChanged);
+    _controller.destinationController.removeListener(_onDestinationTextChanged);
+    _controller.removeListener(_onControllerUpdate);
+    _controller.dispose();
     super.dispose();
   }
 
   Future<void> _loadMapStyle() async {
     _mapStyle = await rootBundle.loadString('assets/map_style_minimal.json');
   }
-
-  Future<void> _initializeLocation() async {
-    try {
-      print('🔍 Iniciando obtención de ubicación...');
-      
-      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      print('📍 GPS activado: $serviceEnabled');
-      
-      if (!serviceEnabled) {
-        setState(() {
-          _errorMessage = 'GPS desactivado. Por favor activa la ubicación en tu dispositivo.';
-          _isLoading = false;
-        });
-        _showErrorSnackBar(_errorMessage!);
-        return;
-      }
-
-      LocationPermission permission = await Geolocator.checkPermission();
-      print('🔐 Permiso actual: $permission');
-      
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-        print('🔐 Permiso después de solicitud: $permission');
-      }
-      
-      if (permission == LocationPermission.deniedForever) {
-        setState(() {
-          _errorMessage = 'Permisos de ubicación denegados permanentemente. Ve a Configuración para habilitarlos.';
-          _isLoading = false;
-        });
-        _showErrorSnackBar(_errorMessage!);
-        return;
-      }
-
-      if (permission == LocationPermission.denied) {
-        setState(() {
-          _errorMessage = 'Permisos de ubicación denegados. La app necesita acceso a tu ubicación.';
-          _isLoading = false;
-        });
-        _showErrorSnackBar(_errorMessage!);
-        return;
-      }
-      
-      if (permission == LocationPermission.whileInUse || 
-          permission == LocationPermission.always) {
-        print('✅ Obteniendo ubicación...');
-        
-        Position position = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.high,
-          timeLimit: const Duration(seconds: 10),
-        );
-        
-        print('📍 Ubicación obtenida: ${position.latitude}, ${position.longitude}');
-        print('📍 Precisión: ${position.accuracy} metros');
-        
-        setState(() {
-          _currentPosition = LatLng(position.latitude, position.longitude);
-          _originPosition = _currentPosition;
-          _isLoading = false;
-        });
-        
-        _updateMarkers();
-        _moveToCurrentLocation();
-      } else {
-        setState(() {
-          _errorMessage = 'Permisos insuficientes para obtener ubicación.';
-          _isLoading = false;
-        });
-        _showErrorSnackBar(_errorMessage!);
-      }
-    } catch (e) {
-      print('❌ Error obteniendo ubicación: $e');
-      setState(() {
-        _errorMessage = 'Error al obtener ubicación: ${e.toString()}';
-        _isLoading = false;
-      });
-      _showErrorSnackBar(_errorMessage!);
+  
+  void _onControllerUpdate() {
+    if (mounted) setState(() {});
+  }
+  
+  void _onOriginTextChanged() {
+    if(_controller.isSelectSuggestionOrigin) return;
+    
+    final text = _controller.originController.text;
+    
+    if (text.isNotEmpty && 
+        text != 'Tu Ubicación' && 
+        text != 'Ubicación seleccionada' &&
+        text != 'Obteniendo dirección...') {
+      _controller.searchOriginPlaces(text);
     }
   }
-
-  void _moveToCurrentLocation() {
-    // Solo mover a ubicación actual si estamos en fase origen y no hay origen seleccionado
-    if (_currentPosition != null && mapController != null && 
-        _phase == SelectionPhase.origin && _originPosition == _currentPosition) {
-      print('🗺️ Moviendo cámara a ubicación actual: $_currentPosition');
-      mapController!.animateCamera(
-        CameraUpdate.newCameraPosition(
-          CameraPosition(
-            target: _currentPosition!,
-            zoom: 15.0,
-          ),
-        ),
-      );
+  
+  void _onDestinationTextChanged() {
+    if(_controller.isSelectSuggestionDestination) return;
+    
+    final text = _controller.destinationController.text;
+    
+    if (text.isNotEmpty && 
+        text != 'Ubicación seleccionada' &&
+        text != 'Obteniendo dirección...') {
+      _controller.searchDestinationPlaces(text);
     }
   }
-
-  void _showErrorSnackBar(String message) {
+  
+  void _showSnackBar(String message, {bool isError = false}) {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(message),
-          backgroundColor: Colors.red,
-          duration: const Duration(seconds: 5),
-          action: SnackBarAction(
-            label: 'OK',
-            textColor: Colors.white,
-            onPressed: () {},
+          backgroundColor: isError ? Colors.red : AppColors.success,
+          duration: Duration(seconds: isError ? 5 : 2),
+        ),
+      );
+    }
+  }
+  
+  void _onSearchRoutes() {
+    _controller.searchRoutes();
+    
+    if (!_controller.hasRouteResults && mounted) {
+      _showSnackBar('No se encontraron rutas viables', isError: true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final keyboardVisible = MediaQuery.of(context).viewInsets.bottom > 0;
+    return Stack(
+        children: [
+          // Mapa de Google
+          GoogleMap(
+            onMapCreated: (mapController) {
+              mapController.setMapStyle(_mapStyle);
+              _controller.setMapController(mapController);
+            },
+            initialCameraPosition: CameraPosition(
+              target: _controller.currentPosition ?? const LatLng(-16.409, -71.537),
+              zoom: 15,
+            ),
+            markers: _controller.markers,
+            polylines: _controller.polylines,
+            onTap: _controller.onMapTap,
+            myLocationEnabled: true,
+            myLocationButtonEnabled: false,
+            zoomControlsEnabled: false,
           ),
-        ),
-      );
-    }
-  }
-
-  void _updateMarkers() {
-    _markers.clear();
-    
-    if (_originPosition != null) {
-      _markers.add(
-        Marker(
-          markerId: const MarkerId('origin'),
-          position: _originPosition!,
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
-          infoWindow: const InfoWindow(title: 'Origen'),
-        ),
-      );
-    }
-    
-    if (_destinationPosition != null) {
-      _markers.add(
-        Marker(
-          markerId: const MarkerId('destination'),
-          position: _destinationPosition!,
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
-          infoWindow: const InfoWindow(title: 'Destino'),
-        ),
-      );
-    }
-  }
-
-  void _onMapTap(LatLng position) {
-    if (_phase == SelectionPhase.origin) {
-      setState(() {
-        _originPosition = position;
-        _originController.text = 'Ubicación seleccionada';
-        _phase = SelectionPhase.destination;
-      });
-      _updateMarkers();
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Ahora toca el destino en el mapa'),
-          duration: Duration(seconds: 2),
-          backgroundColor: AppColors.success,
-        ),
-      );
-    } else if (_phase == SelectionPhase.destination) {
-      setState(() {
-        _destinationPosition = position;
-        _destinationController.text = 'Ubicación seleccionada';
-      });
-      _updateMarkers();
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('¡Listo! Ahora puedes continuar'),
-          duration: Duration(seconds: 2),
-          backgroundColor: AppColors.success,
-        ),
-      );
-    }
-  }
-
-  void _onOriginFieldTap() {
-    setState(() {
-      _phase = SelectionPhase.origin;
-      _originPosition = null;
-      _destinationPosition = null;
-      _originController.text = 'Tu Ubicación';
-      _destinationController.text = '';
-    });
-    _updateMarkers();
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Toca el mapa para seleccionar origen'),
-        duration: Duration(seconds: 2),
-        backgroundColor: AppColors.success,
-      ),
-    );
-  }
-
-  void _onDestinationFieldTap() {
-    if (_originPosition == null) return;
-    
-    setState(() {
-      _phase = SelectionPhase.destination;
-    });
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Toca el mapa para seleccionar destino'),
-        duration: Duration(seconds: 2),
-        backgroundColor: AppColors.success,
-      ),
-    );
-  }
-
-  void _onContinue() async {
-    if (!_canContinue) return;
-    
-    if (_originPosition == null || _destinationPosition == null) return;
-    
-    setState(() {
-      _isLoading = true;
-    });
-    
-    // Buscar las mejores rutas
-    final bestRoutes = await _geoJsonService.findBestRoutes(
-      origin: _originPosition!,
-      destination: _destinationPosition!,
-      maxWalkingDistanceMeters: 500,
-    );
-    
-    if (bestRoutes.isEmpty) {
-      setState(() {
-        _isLoading = false;
-        _errorMessage = 'No se encontraron rutas que conecten origen y destino.\nIntenta aumentar la distancia de caminata.';
-      });
-      return;
-    }
-    
-    setState(() {
-      _routeScores = bestRoutes;
-      _routeGroups = bestRoutes.map((r) => r.route).toList();
-      _phase = SelectionPhase.completed;
-      _showRouteNavigation = true;
-      _currentRouteIndex = 0;
-      _isLoading = false;
-    });
-    
-    print('🎯 Mostrando ${_routeGroups.length} rutas óptimas');
-    _showCurrentRoute();
-  }
-  
-  void _showCurrentRoute() async {
-    if (_routeGroups.isEmpty || _routeScores.isEmpty) return;
-    
-    final group = _routeGroups[_currentRouteIndex];
-    final routeScore = _routeScores[_currentRouteIndex];
-    
-    // Primero mostrar las polylines del bus
-    setState(() {
-      _polylines = group.toPolylines();
-    });
-    
-    // Agregar ruta de caminata desde origen hasta punto de recogida
-    if (_originPosition != null && routeScore.pickupPoint != null) {
-      final walkingPoints = await _getWalkingRoute(_originPosition!, routeScore.pickupPoint!);
-      if (walkingPoints != null && walkingPoints.isNotEmpty) {
-        setState(() {
-          _polylines.add(Polyline(
-            polylineId: const PolylineId('walking_to_pickup'),
-            points: walkingPoints,
-            color: Colors.blue,
-            width: 4,
-            patterns: [PatternItem.dash(20), PatternItem.gap(10)],
-            geodesic: true,
-          ));
-        });
-        print('🚶 Ruta de caminata trazada: ${walkingPoints.length} puntos');
-      } else {
-        // Fallback a línea recta si falla la API
-        setState(() {
-          _polylines.add(Polyline(
-            polylineId: const PolylineId('walking_to_pickup'),
-            points: [_originPosition!, routeScore.pickupPoint!],
-            color: Colors.blue,
-            width: 4,
-            patterns: [PatternItem.dash(20), PatternItem.gap(10)],
-            geodesic: true,
-          ));
-        });
-      }
-    }
-    
-    // Agregar ruta de caminata desde punto de bajada hasta destino
-    if (_destinationPosition != null && routeScore.dropoffPoint != null) {
-      final walkingPoints = await _getWalkingRoute(routeScore.dropoffPoint!, _destinationPosition!);
-      if (walkingPoints != null && walkingPoints.isNotEmpty) {
-        setState(() {
-          _polylines.add(Polyline(
-            polylineId: const PolylineId('walking_to_destination'),
-            points: walkingPoints,
-            color: Colors.blue,
-            width: 4,
-            patterns: [PatternItem.dash(20), PatternItem.gap(10)],
-            geodesic: true,
-          ));
-        });
-      } else {
-        // Fallback a línea recta si falla la API
-        setState(() {
-          _polylines.add(Polyline(
-            polylineId: const PolylineId('walking_to_destination'),
-            points: [routeScore.dropoffPoint!, _destinationPosition!],
-            color: Colors.blue,
-            width: 4,
-            patterns: [PatternItem.dash(20), PatternItem.gap(10)],
-            geodesic: true,
-          ));
-        });
-      }
-    }
-    
-    // Centrar mapa en el punto de origen (punto verde) en lugar del inicio de la ruta
-    if (_originPosition != null && mapController != null) {
-      mapController!.animateCamera(
-        CameraUpdate.newLatLngZoom(_originPosition!, 15),
-      );
-      print('📍 Centrando en punto de origen: $_originPosition');
-    }
-  }
-  
-  void _nextRoute() {
-    setState(() {
-      // Comportamiento circular: después del último vuelve al primero
-      _currentRouteIndex = (_currentRouteIndex + 1) % _routeGroups.length;
-    });
-    _showCurrentRoute();
-  }
-  
-  void _nextStep() {
-    if (_phase == SelectionPhase.origin) {
-      print('📍 Cambiando a fase destination. Origen: $_originPosition');
-      setState(() {
-        _phase = SelectionPhase.destination;
-      });
-      // Centrar la cámara en el origen seleccionado después de actualizar el estado
-      if (_originPosition != null && mapController != null) {
-        print('📍 Moviendo cámara al origen: $_originPosition');
-        Future.delayed(const Duration(milliseconds: 300), () {
-          mapController?.animateCamera(
-            CameraUpdate.newLatLngZoom(_originPosition!, 16),
-          );
-        });
-      }
-    } else if (_phase == SelectionPhase.destination && _originPosition != null) {
-      // Continuar con búsqueda de rutas si ya hay destino
-      if (_destinationPosition != null) {
-        _onContinue();
-      }
-    }
-  }
-  
-  void _previousStep() {
-    setState(() {
-      if (_phase == SelectionPhase.completed) {
-        _phase = SelectionPhase.destination;
-        _showRouteNavigation = false;
-        _polylines.clear();
-      } else if (_phase == SelectionPhase.destination) {
-        _phase = SelectionPhase.origin;
-      }
-    });
-  }
-  
-  void _closeRouteNavigation() {
-    setState(() {
-      _showRouteNavigation = false;
-      _polylines.clear();
-    });
-  }
-
-  // Decodificar polyline de Google Maps
-  List<LatLng> _decodePolyline(String encoded) {
-    List<LatLng> points = [];
-    int index = 0, len = encoded.length;
-    int lat = 0, lng = 0;
-
-    while (index < len) {
-      int b, shift = 0, result = 0;
-      do {
-        b = encoded.codeUnitAt(index++) - 63;
-        result |= (b & 0x1f) << shift;
-        shift += 5;
-      } while (b >= 0x20);
-      int dlat = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
-      lat += dlat;
-
-      shift = 0;
-      result = 0;
-      do {
-        b = encoded.codeUnitAt(index++) - 63;
-        result |= (b & 0x1f) << shift;
-        shift += 5;
-      } while (b >= 0x20);
-      int dlng = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
-      lng += dlng;
-
-      points.add(LatLng(lat / 1E5, lng / 1E5));
-    }
-    return points;
-  }
-
-  // Obtener ruta de caminata usando Google Directions API
-  Future<List<LatLng>?> _getWalkingRoute(LatLng origin, LatLng destination) async {
-    try {
-      final url = Uri.parse(
-        'https://maps.googleapis.com/maps/api/directions/json?'
-        'origin=${origin.latitude},${origin.longitude}&'
-        'destination=${destination.latitude},${destination.longitude}&'
-        'mode=walking&'
-        'key=$_googleApiKey'
-      );
-
-      final response = await http.get(url);
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        if (data['routes'] != null && data['routes'].isNotEmpty) {
-          final polyline = data['routes'][0]['overview_polyline']['points'];
-          return _decodePolyline(polyline);
-        }
-      }
-    } catch (e) {
-      print('❌ Error obteniendo ruta de caminata: $e');
-    }
-    return null;
-  }
-
-  Future<void> _searchPlaces(String query, {required bool isOrigin}) async {
-    if (query.length < 3) {
-      setState(() {
-        if (isOrigin) {
-          _showOriginSuggestions = false;
-        } else {
-          _showDestinationSuggestions = false;
-        }
-      });
-      return;
-    }
-
-    final url = Uri.parse(
-      'https://maps.googleapis.com/maps/api/place/autocomplete/json?input=$query&key=$_googleApiKey&location=-16.409,-71.537&radius=50000&language=es&components=country:pe',
-    );
-
-    try {
-      final response = await http.get(url);
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        if (data['status'] == 'OK') {
-          setState(() {
-            if (isOrigin) {
-              _originSuggestions = List<Map<String, dynamic>>.from(
-                data['predictions'].map((p) => {
-                  'description': p['description'],
-                  'place_id': p['place_id'],
-                }),
-              );
-              _showOriginSuggestions = true;
-            } else {
-              _destinationSuggestions = List<Map<String, dynamic>>.from(
-                data['predictions'].map((p) => {
-                  'description': p['description'],
-                  'place_id': p['place_id'],
-                }),
-              );
-              _showDestinationSuggestions = true;
-            }
-          });
-        }
-      }
-    } catch (e) {
-      print('Error buscando lugares: $e');
-    }
-  }
-
-  Future<void> _selectPlace(String placeId, {required bool isOrigin}) async {
-    final url = Uri.parse(
-      'https://maps.googleapis.com/maps/api/place/details/json?place_id=$placeId&key=$_googleApiKey&language=es',
-    );
-
-    try {
-      final response = await http.get(url);
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        if (data['status'] == 'OK') {
-          final location = data['result']['geometry']['location'];
-          final lat = location['lat'];
-          final lng = location['lng'];
-          final name = data['result']['name'];
-
-          setState(() {
-            if (isOrigin) {
-              _isSelectingOrigin = true;
-              _originPosition = LatLng(lat, lng);
-              _originController.text = name;
-              _showOriginSuggestions = false;
-              _originSuggestions.clear();
-            } else {
-              _isSelectingDestination = true;
-              _destinationPosition = LatLng(lat, lng);
-              _destinationController.text = name;
-              _showDestinationSuggestions = false;
-              _destinationSuggestions.clear();
-              // Cerrar teclado cuando se completa el destino
-              FocusScope.of(context).unfocus();
-            }
-          });
-
-          // Resetear flags después de un breve delay
-          Future.delayed(const Duration(milliseconds: 100), () {
-            setState(() {
-              if (isOrigin) {
-                _isSelectingOrigin = false;
-              } else {
-                _isSelectingDestination = false;
-              }
-            });
-          });
-
-          _updateMarkers();
           
-          if (mapController != null) {
-            mapController!.animateCamera(
-              CameraUpdate.newLatLng(LatLng(lat, lng)),
-            );
-          }
-        }
-      }
-    } catch (e) {
-      print('Error obteniendo detalles del lugar: $e');
-    }
-  }
-
-
-  Widget _buildLocationField({
-    required TextEditingController controller,
-    required String label,
-    required IconData icon,
-    required Color iconColor,
-    required VoidCallback onTap,
-    bool enabled = true,
-    bool isActive = false,
-  }) {
-    return Material(
-      elevation: 4,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: isActive
-              ? Border.all(color: AppColors.primary, width: 2)
-              : null,
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-          child: Row(
-            children: [
-              Icon(icon, color: iconColor, size: 28),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+          // Botón de retroceso con franja
+          if (_controller.showRouteInfo)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: Container(
+                color: AppColors.primary,
+                padding: EdgeInsets.only(
+                  top: MediaQuery.of(context).padding.top,
+                ),
+                child: Row(
                   children: [
-                    Text(
-                      label,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey[600],
-                        fontWeight: FontWeight.w500,
-                      ),
+                    IconButton(
+                      icon: const Icon(Icons.arrow_back, color: Colors.white),
+                      onPressed: () {
+                        _controller.showRouteInfo = false;
+                        _controller.searchResults = [];
+                        _controller.polylines.clear();
+                        _controller.notifyListeners();
+                      },
                     ),
-                    TextField(
-                      controller: controller,
-                      enabled: enabled,
-                      readOnly: false,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w500,
-                      ),
-                      decoration: InputDecoration(
-                        border: InputBorder.none,
-                        hintText: enabled 
-                          ? 'Escribe o selecciona en el mapa'
-                          : 'Selecciona origen primero',
-                        hintStyle: TextStyle(
-                          color: Colors.grey[400],
-                          fontSize: 14,
+                    const Expanded(
+                      child: Text(
+                        'Ruta',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w500,
                         ),
                       ),
                     ),
                   ],
                 ),
               ),
-              IconButton(
-                icon: const Icon(Icons.my_location),
-                color: AppColors.primary,
-                onPressed: enabled ? onTap : null,
-              ),
-            ],
+            ),
+          
+          // Barra de búsqueda
+          MapSearchBar(
+            originField: SearchInputField(
+              controller: _controller.originController,
+              hintText: 'Tu Ubicación Actual',
+              icon: Icons.location_on,
+              iconColor: Colors.green,
+              readOnly: _controller.showRouteInfo,
+              onTap: () {
+                if (_controller.phase == controller.MapSelectionPhase.origin) {
+                  _controller.phase = controller.MapSelectionPhase.completed;
+                  _controller.notifyListeners();
+                }
+              },
+              onIconTap: _controller.showRouteInfo ? null : () {
+                FocusScope.of(context).unfocus();
+                _controller.enableOriginSelection();
+              },
+              isSelecting: _controller.phase == controller.MapSelectionPhase.origin,
+            ),
+            destinationField: SearchInputField(
+              controller: _controller.destinationController,
+              hintText: 'Destino',
+              icon: Icons.location_on,
+              iconColor: Colors.red,
+              readOnly: _controller.showRouteInfo,
+              onTap: () {
+                if (_controller.phase == controller.MapSelectionPhase.destination) {
+                  _controller.phase = controller.MapSelectionPhase.completed;
+                  _controller.notifyListeners();
+                }
+              },
+              onIconTap: _controller.showRouteInfo ? null : () {
+                FocusScope.of(context).unfocus();
+                _controller.enableDestinationSelection();
+              },
+              isSelecting: _controller.phase == controller.MapSelectionPhase.destination,
+            ),
+            originSuggestions: (_controller.showOriginSuggestions && !_controller.showRouteInfo)
+                ? PlaceSuggestionsList(
+                    suggestions: _controller.originSuggestions,
+                    onSuggestionTap: _controller.selectOriginSuggestion,
+                  )
+                : null,
+            destinationSuggestions: (_controller.showDestinationSuggestions && !_controller.showRouteInfo)
+                ? PlaceSuggestionsList(
+                    suggestions: _controller.destinationSuggestions,
+                    onSuggestionTap: _controller.selectDestinationSuggestion,
+                  )
+                : null,
           ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSuggestionsList(List<Map<String, dynamic>> suggestions, {required bool isOrigin}) {
-    return Container(
-      margin: const EdgeInsets.only(top: 4),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
+          
+          // Botón de buscar rutas
+          if (!_controller.showRouteInfo && !keyboardVisible)
+            MapActionButton(
+              text: 'Buscar Rutas',
+              icon: Icons.search,
+              onPressed: _onSearchRoutes,
+              isEnabled: _controller.canSearchRoutes,
+            ),
+          
+          // Información de la ruta actual
+          if (_controller.showRouteInfo && _controller.currentRoute != null)
+            RouteInfoCard(
+              routeRef: _controller.currentRoute!.ref,
+              walkingDistance: formatDistance(
+                _controller.currentRoute!.walkToPickup +
+                    _controller.currentRoute!.walkToDestination,
+              ),
+              busDistance: formatDistance(_controller.currentRoute!.busDistance),
+              estimatedTime: '${_controller.currentRoute!.getEstimatedTime().toStringAsFixed(0)} min',
+            ),
+          
+          // Controles de navegación entre rutas
+          if (_controller.showRouteInfo && _controller.searchResults.length > 1)
+            RouteNavigationControls(
+              currentIndex: _controller.currentRouteIndex,
+              totalRoutes: _controller.searchResults.length,
+              onNext: _controller.nextRoute,
+              onPrevious: _controller.previousRoute,
+              onClose: _controller.resetSearch,
+            ),
+          
+          // Botón de iniciar tracking con datos reales
+          if (_controller.showRouteInfo && _controller.currentRoute != null)
+            Positioned(
+              bottom: 80,
+              right: 16,
+              child: StartTrackingButton(
+                busNumber: _controller.currentRoute!.ref,
+                routeName: 'Ruta ${_controller.currentRoute!.ref}',
+                origin: _controller.originPosition!,
+                destination: _controller.destinationPosition!,
+                routePoints: _controller.currentRoute!.routePoints,
+                pickupPoint: _controller.currentRoute!.pickupPoint,
+                dropoffPoint: _controller.currentRoute!.dropoffPoint,
+              ),
+            ),
+          
+          // Overlay de carga
+          MapLoadingOverlay(
+            isLoading: _controller.isLoading,
+            message: 'Cargando...',
           ),
         ],
-      ),
-      constraints: const BoxConstraints(maxHeight: 200),
-      child: ListView.builder(
-        shrinkWrap: true,
-        padding: EdgeInsets.zero,
-        itemCount: suggestions.length,
-        itemBuilder: (context, index) {
-          final suggestion = suggestions[index];
-          return ListTile(
-            dense: true,
-            leading: const Icon(Icons.location_on, color: Colors.grey, size: 20),
-            title: Text(
-              suggestion['description'],
-              style: const TextStyle(fontSize: 14),
-            ),
-            onTap: () {
-              _selectPlace(suggestion['place_id'], isOrigin: isOrigin);
-            },
-          );
-        },
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_isLoading) {
-      return const Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            CircularProgressIndicator(),
-            SizedBox(height: 16),
-            Text('Obteniendo tu ubicación...'),
-          ],
-        ),
-      );
-    }
-    
-    return Stack(
-      children: [
-        GoogleMap(
-          onMapCreated: (controller) async {
-            mapController = controller;
-            if (_mapStyle != null) {
-              await controller.setMapStyle(_mapStyle);
-            }
-            _moveToCurrentLocation();
-          },
-          onTap: _onMapTap,
-          initialCameraPosition: CameraPosition(
-            target: _currentPosition ?? _defaultCenter,
-            zoom: 15.0,
-          ),
-          markers: _markers,
-          polylines: _polylines,
-          myLocationEnabled: true,
-          myLocationButtonEnabled: false,
-          compassEnabled: true,
-          mapToolbarEnabled: false,
-          buildingsEnabled: false,
-          trafficEnabled: false,
-        ),
-        
-        Positioned(
-          top: 60,
-          left: 16,
-          right: 16,
-          child: Column(
-            children: [
-              _buildLocationField(
-                controller: _originController,
-                label: 'De:',
-                icon: Icons.location_on,
-                iconColor: AppColors.success,
-                onTap: _onOriginFieldTap,
-                isActive: _phase == SelectionPhase.origin,
-              ),
-              if (_showOriginSuggestions && _originSuggestions.isNotEmpty)
-                _buildSuggestionsList(_originSuggestions, isOrigin: true),
-              const SizedBox(height: 12),
-              _buildLocationField(
-                controller: _destinationController,
-                label: 'Hasta:',
-                icon: Icons.location_on,
-                iconColor: AppColors.error,
-                onTap: _onDestinationFieldTap,
-                enabled: _originPosition != null,
-                isActive: _phase == SelectionPhase.destination,
-              ),
-              if (_showDestinationSuggestions && _destinationSuggestions.isNotEmpty)
-                _buildSuggestionsList(_destinationSuggestions, isOrigin: false),
-            ],
-          ),
-        ),
-        
-        if (_canContinue && !_showRouteNavigation)
-          Positioned(
-            bottom: 120,
-            right: 24,
-            child: FloatingActionButton(
-              onPressed: _onContinue,
-              backgroundColor: AppColors.primary,
-              child: const Icon(
-                Icons.arrow_forward,
-                color: Colors.white,
-                size: 28,
-              ),
-            ),
-          ),
-        
-        if (_showRouteNavigation && _routeGroups.isNotEmpty)
-          Positioned(
-            bottom: 80,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: RouteNavigationControls(
-                currentGroup: _routeGroups.isNotEmpty ? _routeGroups[_currentRouteIndex] : null,
-                currentIndex: _currentRouteIndex,
-                totalRoutes: _routeGroups.length,
-                onPrevious: _previousStep,
-                onNext: _nextStep,
-                onClose: _closeRouteNavigation,
-                onCycleRoute: _nextRoute,
-              ),
-            ),
-          ),
-        
-        if (_errorMessage != null)
-          Positioned(
-            top: 180,
-            left: 16,
-            right: 16,
-            child: Material(
-              elevation: 4,
-              borderRadius: BorderRadius.circular(8),
-              color: Colors.red.shade100,
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Row(
-                  children: [
-                    const Icon(Icons.warning, color: Colors.red),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        _errorMessage!,
-                        style: const TextStyle(color: Colors.red),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-      ],
     );
   }
 }

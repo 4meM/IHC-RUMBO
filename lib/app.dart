@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 import 'core/constants/app_colors.dart';
-import 'features/auth/presentation/pages/login_page.dart';
-import 'features/auth/presentation/pages/verify_code_page.dart';
-import 'features/trip_planner/presentation/pages/search_page.dart';
+import 'core/routing/app_router.dart';
+
 class RumboApp extends StatelessWidget {
   const RumboApp({super.key});
+
+  static final _router = createAppRouter();
 
   @override
   Widget build(BuildContext context) {
@@ -26,27 +26,5 @@ class RumboApp extends StatelessWidget {
     );
   }
 }
-
-// GoRouter Configuration
-final GoRouter _router = GoRouter(
-  initialLocation: '/login',
-  routes: [
-    GoRoute(
-      path: '/login',
-      builder: (context, state) => const LoginPage(),
-    ),
-    GoRoute(
-      path: '/verify-code',
-      builder: (context, state) {
-        final phoneNumber = state.extra as String? ?? '';
-        return VerifyCodePage(phoneNumber: phoneNumber);
-      },
-    ),
-    GoRoute(
-      path: '/home',
-      builder: (context, state) => const SearchPage(),
-    ),
-  ],
-);
 
 

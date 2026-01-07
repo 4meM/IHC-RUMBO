@@ -1,114 +1,81 @@
 import 'package:flutter/material.dart';
 import '../../../../core/constants/app_colors.dart';
-import '../../data/services/geojson_parser_service.dart';
 
+/// Widget: Controles de navegación entre rutas
+/// Propósito único: Mostrar botones anterior/siguiente y cerrar búsqueda
 class RouteNavigationControls extends StatelessWidget {
-  final RouteGroup? currentGroup;
   final int currentIndex;
   final int totalRoutes;
   final VoidCallback onPrevious;
   final VoidCallback onNext;
   final VoidCallback onClose;
-  final VoidCallback onCycleRoute;
 
   const RouteNavigationControls({
     super.key,
-    this.currentGroup,
     required this.currentIndex,
     required this.totalRoutes,
     required this.onPrevious,
     required this.onNext,
     required this.onClose,
-    required this.onCycleRoute,
   });
 
   @override
   Widget build(BuildContext context) {
-    if (currentGroup == null) return const SizedBox.shrink();
-
-    const buttonSize = 60.0;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    return Positioned(
+      top: 280,
+      right: 16,
+      child: Column(
         children: [
-          // Previous arrow button - left extreme
-          GestureDetector(
-            onTap: onPrevious,
-            child: Container(
-              width: buttonSize,
-              height: buttonSize,
-              decoration: BoxDecoration(
-                color: AppColors.primary,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Icon(
-                Icons.arrow_back_ios_new,
-                color: Colors.white,
-                size: 24,
+          // Botón anterior
+          FloatingActionButton.small(
+            heroTag: 'previous',
+            onPressed: onPrevious,
+            backgroundColor: AppColors.primary,
+            child: const Icon(Icons.arrow_upward),
+          ),
+          
+          const SizedBox(height: 8),
+          
+          // Indicador de ruta actual
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.2),
+                  blurRadius: 4,
+                ),
+              ],
+            ),
+            child: Text(
+              '${currentIndex + 1}/$totalRoutes',
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 14,
               ),
             ),
           ),
           
-          // Bus icon with number - center
-          GestureDetector(
-            onTap: onCycleRoute,
-            child: Container(
-              width: buttonSize,
-              height: buttonSize,
-              decoration: BoxDecoration(
-                color: AppColors.primary,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  Image.asset(
-                    'assets/images/ico_bus.png',
-                    width: 50,
-                    height: 50,
-                    fit: BoxFit.contain,
-                  ),
-                  Positioned(
-                    top: 18,
-                    child: Text(
-                      '${currentIndex + 1}',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        shadows: [
-                          Shadow(
-                            color: Colors.black,
-                            blurRadius: 4,
-                            offset: Offset(0, 0),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+          const SizedBox(height: 8),
+          
+          // Botón siguiente
+          FloatingActionButton.small(
+            heroTag: 'next',
+            onPressed: onNext,
+            backgroundColor: AppColors.primary,
+            child: const Icon(Icons.arrow_downward),
           ),
           
-          // Next arrow button - right extreme
-          GestureDetector(
-            onTap: onNext,
-            child: Container(
-              width: buttonSize,
-              height: buttonSize,
-              decoration: BoxDecoration(
-                color: AppColors.primary,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Icon(
-                Icons.arrow_forward,
-                color: Colors.white,
-                size: 28,
-              ),
-            ),
+          const SizedBox(height: 16),
+          
+          // Botón cerrar
+          FloatingActionButton.small(
+            heroTag: 'close',
+            onPressed: onClose,
+            backgroundColor: Colors.red,
+            child: const Icon(Icons.close),
           ),
         ],
       ),
