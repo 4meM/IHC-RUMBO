@@ -2,7 +2,7 @@
 // Archivo: EJEMPLOS_COMPASS.dart
 
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'features/trip_planner/data/services/compass_service.dart';
+import 'lib/features/trip_planner/data/services/compass_service.dart';
 
 // ============================================================================
 // EJEMPLO 1: USO BÁSICO - INICIAR Y DETENER LA BRÚJULA
@@ -218,7 +218,7 @@ class _CompassDisplayWidgetState extends State<CompassDisplayWidget> {
 // EJEMPLO 6: MÚLTIPLES PARADEROS - COMPARAR DISTANCIAS
 // ============================================================================
 
-import 'features/trip_planner/data/models/smart_bus_stop_model.dart';
+import 'lib/features/trip_planner/data/models/smart_bus_stop_model.dart';
 
 class MultipleStopsCompassExample {
   late CompassService _compassService;
@@ -231,34 +231,49 @@ class MultipleStopsCompassExample {
     _compassService = CompassService();
     _compassService.startListening();
 
-    // Simular 3 paraderos
+    // Simular 3 paraderos (ajustado a la definición real de SmartBusStopModel)
     stops = [
       SmartBusStopModel(
         id: '1',
+        name: 'Paradero 1',
         location: LatLng(-16.4000, -71.5360),
-        distance: 75,
-        estimatedTime: 5,
-        crowdLevel: 0.3,
         type: SmartStopType.nearest,
-        availableSeats: 15,
+        walkingDistance: 75,
+        estimatedBusDistance: 200,
+        estimatedWaitTime: 5,
+        estimatedTravelTime: 10,
+        crowdLevel: 0.3,
+        estimatedAvailableSeats: 15,
+        reason: 'Más cercano',
+        routes: ['4A'],
       ),
       SmartBusStopModel(
         id: '2',
+        name: 'Paradero 2',
         location: LatLng(-16.4050, -71.5450),
-        distance: 150,
-        estimatedTime: 8,
-        crowdLevel: 0.2,
         type: SmartStopType.avoidTraffic,
-        availableSeats: 22,
+        walkingDistance: 150,
+        estimatedBusDistance: 300,
+        estimatedWaitTime: 8,
+        estimatedTravelTime: 15,
+        crowdLevel: 0.2,
+        estimatedAvailableSeats: 22,
+        reason: 'Evita tráfico',
+        routes: ['4A'],
       ),
       SmartBusStopModel(
         id: '3',
+        name: 'Paradero 3',
         location: LatLng(-16.3950, -71.5300),
-        distance: 120,
-        estimatedTime: 6,
-        crowdLevel: 0.1,
         type: SmartStopType.guaranteedSeats,
-        availableSeats: 28,
+        walkingDistance: 120,
+        estimatedBusDistance: 250,
+        estimatedWaitTime: 6,
+        estimatedTravelTime: 12,
+        crowdLevel: 0.1,
+        estimatedAvailableSeats: 28,
+        reason: 'Más asientos',
+        routes: ['4A'],
       ),
     ];
   }

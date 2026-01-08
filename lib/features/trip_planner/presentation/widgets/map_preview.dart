@@ -47,7 +47,6 @@ class _MapPreviewState extends State<MapPreview> {
     _controller.originController.removeListener(_onOriginTextChanged);
     _controller.destinationController.removeListener(_onDestinationTextChanged);
     _controller.removeListener(_onControllerUpdate);
-    _controller.dispose();
     super.dispose();
   }
 
@@ -258,7 +257,7 @@ class _MapPreviewState extends State<MapPreview> {
                 origin: _controller.originPosition!,
                 destination: _controller.destinationPosition!,
                 routePoints: _controller.currentRoute!.routePoints,
-                pickupPoint: _controller.currentRoute!.pickupPoint,
+                  pickupPoint: _controller.currentEffectivePickup ?? _controller.currentRoute!.pickupPoint,
                 dropoffPoint: _controller.currentRoute!.dropoffPoint,
               ),
             ),

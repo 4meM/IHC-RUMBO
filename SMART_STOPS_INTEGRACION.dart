@@ -106,7 +106,13 @@ Positioned(
 // 3. IMPORTAR EN TU MAIN.DART O APP.DART
 // ============================================
 
-import 'features/trip_planner/presentation/pages/route_detail_page.dart';
+import 'package:flutter/material.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'lib/features/trip_planner/data/models/bus_route_model.dart';
+import 'lib/features/trip_planner/data/models/smart_bus_stop_model.dart';
+import 'lib/features/trip_planner/data/services/smart_bus_stops_service.dart';
+import 'lib/features/trip_planner/data/services/geojson_parser_service.dart';
+import 'lib/features/trip_planner/data/services/compass_service.dart';
 
 // ============================================
 // 4. EJEMPLO COMPLETO DE USO EN UN BLOC/CONTROLLER
@@ -281,6 +287,8 @@ void testSmartStops() {
     id: 'test_route_1',
     name: 'Test Route',
     ref: '4A',
+    from: 'Origen',
+    to: 'Destino',
     coordinates: [
       LatLng(-16.3900, -71.5300),
       LatLng(-16.3950, -71.5350),

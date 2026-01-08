@@ -2,12 +2,12 @@
 /// Cada función hace UNA cosa. Como programación competitiva.
 
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'core/utils/geometry_utils.dart';
-import 'core/utils/map_marker_factory.dart';
-import 'core/utils/map_polyline_factory.dart';
-import 'core/services/geolocation_helper.dart';
-import 'core/services/places_api_helper.dart';
-import 'features/trip_planner/data/helpers/route_calculation_helper.dart';
+import 'lib/core/utils/geometry_utils.dart';
+import 'lib/core/utils/map_marker_factory.dart';
+import 'lib/core/utils/map_polyline_factory.dart';
+import 'lib/core/services/geolocation_helper.dart';
+import 'lib/core/services/places_api_helper.dart';
+import 'lib/features/trip_planner/data/helpers/route_calculation_helper.dart';
 
 void ejemplosDeUso() async {
   // ============================================
@@ -18,6 +18,7 @@ void ejemplosDeUso() async {
   final puntoB = LatLng(-16.4003, -71.5300); // Cerca del Misti
   
   // SALIDA: Distancia en metros
+  // Asegúrate de que calculateDistance esté implementada en geometry_utils.dart
   final distanciaMetros = calculateDistance(puntoA, puntoB);
   print('Distancia: $distanciaMetros metros'); // ~1200 metros
   
@@ -38,6 +39,7 @@ void ejemplosDeUso() async {
   ];
   
   // SALIDA: Punto más cercano y su distancia
+  // Asegúrate de que findClosestPoint esté implementada en geometry_utils.dart
   final resultado = findClosestPoint(objetivo, paradas);
   print('Parada más cercana: ${resultado.point}');
   print('A ${resultado.distance.toStringAsFixed(0)}m de distancia');
@@ -51,6 +53,7 @@ void ejemplosDeUso() async {
   final destino = LatLng(-16.400, -71.530);
   
   // SALIDA: Set de marcadores listos para mostrar
+  // Asegúrate de que createOriginDestinationMarkers esté implementada en map_marker_factory.dart
   final marcadores = createOriginDestinationMarkers(origen, destino);
   
   // También puedes crear marcadores individuales:
@@ -70,6 +73,7 @@ void ejemplosDeUso() async {
   ];
   
   // SALIDA: Polyline azul para mostrar en el mapa
+  // Asegúrate de que createBusRoutePolyline esté implementada en map_polyline_factory.dart
   final polylineBus = createBusRoutePolyline('ruta_1', rutaBus);
   
   // Para caminar (gris y punteado)
@@ -84,6 +88,7 @@ void ejemplosDeUso() async {
   // ============================================
   // ENTRADA: Nada
   // SALIDA: Ubicación o error
+  // Asegúrate de que getLocationSafely esté implementada en geolocation_helper.dart
   final ubicacion = await getLocationSafely();
   
   if (ubicacion.error != null) {
@@ -102,6 +107,7 @@ void ejemplosDeUso() async {
   final query = 'Plaza de Armas';
   
   // SALIDA: Lista de sugerencias
+  // Asegúrate de que searchPlacesInArequipa esté implementada en places_api_helper.dart
   final sugerencias = await searchPlacesInArequipa(query);
   
   for (final sugerencia in sugerencias) {
@@ -128,6 +134,7 @@ void ejemplosDeUso() async {
   final miDestino = LatLng(-16.405, -71.535);
   
   // SALIDA: Todas las métricas calculadas
+  // Asegúrate de que calculateRouteMetrics esté implementada en route_calculation_helper.dart
   final metricas = calculateRouteMetrics(
     routePoints: rutaPuntos,
     origin: miOrigen,
@@ -154,6 +161,7 @@ void ejemplosDeUso() async {
   // EJEMPLO 8: Verificar si una ruta es viable
   // ============================================
   // ENTRADA: Ruta, origen, destino, distancia máxima caminando
+  // Asegúrate de que isRouteViable esté implementada en route_calculation_helper.dart
   final esViable = isRouteViable(
     routePoints: rutaPuntos,
     origin: miOrigen,
@@ -175,11 +183,13 @@ void ejemplosDeUso() async {
   final todosPuntos = [origen, destino, ...rutaPuntos];
   
   // SALIDA: Límites geográficos
+  // Asegúrate de que calculateBounds esté implementada en geometry_utils.dart
   final limites = calculateBounds(todosPuntos);
   print('Southwest: ${limites.southwest}');
   print('Northeast: ${limites.northeast}');
   
   // Expandir con margen de 500 metros
+  // Asegúrate de que expandBounds esté implementada en geometry_utils.dart
   final limitesExpandidos = expandBounds(limites, 500);
   
   
@@ -187,6 +197,7 @@ void ejemplosDeUso() async {
   // EJEMPLO 10: Calcular punto central
   // ============================================
   // ENTRADA: Lista de puntos
+  // Asegúrate de que calculateCentroid esté implementada en geometry_utils.dart
   final centro = calculateCentroid(todosPuntos);
   print('Centro geométrico: $centro');
   
@@ -195,6 +206,7 @@ void ejemplosDeUso() async {
   // EJEMPLO 11: Calcular scoring de ruta
   // ============================================
   // ENTRADA: Distancias de caminar y bus
+  // Asegúrate de que calculateRouteScore esté implementada en route_calculation_helper.dart
   final score = calculateRouteScore(
     walkToPickup: 300.0,      // 300m caminando al bus
     walkToDestination: 200.0,  // 200m del bus al destino

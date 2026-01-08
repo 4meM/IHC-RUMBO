@@ -3,7 +3,9 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../../data/models/bus_route_model.dart';
 import '../../data/models/smart_bus_stop_model.dart';
 import '../../data/services/smart_bus_stops_service.dart';
+import '../../data/services/selected_stop_storage.dart';
 import '../widgets/smart_stops_ar_view.dart';
+import '../widgets/start_tracking_button.dart';
 
 /// Página de detalle de ruta con opciones de AR
 class RouteDetailPage extends StatefulWidget {
@@ -23,8 +25,15 @@ class RouteDetailPage extends StatefulWidget {
 }
 
 class _RouteDetailPageState extends State<RouteDetailPage> {
+    /// Devuelve la ubicación del paradero seleccionado
+    LatLng get selectedStopLocation => _smartStops[_selectedStopIndex].location;
   late List<SmartBusStopModel> _smartStops;
-  bool _showARView = false;
+  
+  final Map<int, bool> _expandedStops = {}; // Control de expansión por índice
+  int _selectedStopIndex = 0;
+  // Persistencia simple en memoria para navegación entre pantallas
+  // Si quieres persistencia entre sesiones, usar SharedPreferences o similar
+  int? _pendingSelectedIndex;
 
   @override
   void initState() {
@@ -38,21 +47,72 @@ class _RouteDetailPageState extends State<RouteDetailPage> {
       route: widget.route,
       routeRef: widget.routeRef,
     );
+    // Restaurar selección guardada en memoria (si existe)
+    final savedStopType = SelectedStopStorage.getSavedStopType(widget.routeRef);
+    // Debug: listar stops y valor guardado
+    try {
+      // ignore: avoid_print
+      print('[RouteDetailPage] _generateSmartStops routeRef=${widget.routeRef} saved=$savedStopType');
+      for (var i = 0; i < _smartStops.length; i++) {
+        // ignore: avoid_print
+        print('[RouteDetailPage]  stop[$i] type=${_smartStops[i].type.name} name=${_smartStops[i].name}');
+      }
+    } catch (_) {}
+
+    if (savedStopType != null) {
+      final idx = _smartStops.indexWhere((s) => s.type.name == savedStopType);
+      if (idx != -1) {
+        _selectedStopIndex = idx;
+      } else {
+        _selectedStopIndex = 0;
+      }
+    } else {
+      _selectedStopIndex = 0;
+    }
+  }
+
+  Future<void> _openARView() async {
+    final result = await Navigator.push<int>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => SmartStopsARView(
+          stops: _smartStops,
+          userLocation: widget.userLocation,
+          initialSelectedIndex: _selectedStopIndex,
+          onSelectedIndexChanged: (index) {
+            // Actualizar índice y refrescar UI para que el cambio sea visible
+            if (mounted) {
+              setState(() {
+                _selectedStopIndex = index;
+                SelectedStopStorage.setSavedStopType(widget.routeRef, _smartStops[index].type.name);
+              });
+            } else {
+              _selectedStopIndex = index;
+              SelectedStopStorage.setSavedStopType(widget.routeRef, _smartStops[index].type.name);
+            }
+          },
+          onCloseAR: () {
+            // El padre realiza el pop y retorna el índice seleccionado
+            Navigator.pop(context, _selectedStopIndex);
+          },
+        ),
+      ),
+    );
+
+    if (result != null) {
+        setState(() {
+        _selectedStopIndex = result;
+        SelectedStopStorage.setSavedStopType(widget.routeRef, _smartStops[result].type.name);
+        try {
+          // ignore: avoid_print
+          print('[RouteDetailPage] AR returned index=$result for routeRef=${widget.routeRef}');
+        } catch (_) {}
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_showARView) {
-      return Scaffold(
-        body: SmartStopsARView(
-          stops: _smartStops,
-          userLocation: widget.userLocation,
-          onCloseAR: () {
-            setState(() => _showARView = false);
-          },
-        ),
-      );
-    }
 
     return Scaffold(
       appBar: AppBar(
@@ -61,286 +121,208 @@ class _RouteDetailPageState extends State<RouteDetailPage> {
         backgroundColor: Colors.white,
         foregroundColor: Colors.black,
       ),
-      body: ListView(
-        children: [
-          // Información básica de la ruta
-          Padding(
-            padding: EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: double.infinity,
-                  padding: EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.blue[50],
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.blue[200]!),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Container(
-                            width: 50,
-                            height: 50,
-                            decoration: BoxDecoration(
-                              color: Colors.blue,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Center(
-                              child: Text(
-                                widget.routeRef,
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 20,
-                                ),
-                              ),
-                            ),
-                          ),
-                          SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  widget.route.name,
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                SizedBox(height: 4),
-                                Text(
-                                  '${widget.route.coordinates.length} paradas',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.grey[700],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                      SizedBox(height: 12),
-                      if (widget.route.ref.isNotEmpty)
-                        Row(
-                          children: [
-                            Icon(Icons.info_outline, size: 16, color: Colors.blue),
-                            SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                'Referencia: ${widget.route.ref}',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.blue[700],
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                    ],
-                  ),
+      body: SafeArea(
+        child: ListView(
+          children: [
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Text(
+                'Paraderos Recomendados',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
                 ),
-              ],
-            ),
-          ),
-
-          // Sección de paraderos inteligentes
-          Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Text(
-              'Paraderos Recomendados',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
               ),
             ),
-          ),
-
-          // Grid de paradas inteligentes
-          Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16),
-            child: GridView.count(
-              crossAxisCount: 1,
-              shrinkWrap: true,
-              physics: NeverScrollableScrollPhysics(),
-              childAspectRatio: 1.4,
-              mainAxisSpacing: 12,
-              children: _smartStops.map((stop) {
-                return _buildSmartStopCard(stop);
-              }).toList(),
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16),
+              child: Column(
+                children: List.generate(_smartStops.length, (index) {
+                  return Padding(
+                    padding: EdgeInsets.only(bottom: 12),
+                    child: _buildSmartStopCard(_smartStops[index], index),
+                  );
+                }),
+              ),
             ),
-          ),
-
-          SizedBox(height: 24),
-
-          // Botón flotante para ver en AR
-          Padding(
-            padding: EdgeInsets.all(16),
-            child: Column(
-              children: [
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: () {
-                      setState(() => _showARView = true);
-                    },
-                    icon: Icon(Icons.camera_alt),
-                    label: Text(
-                      'Ver Paraderos en AR',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.blue,
-                      padding: EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                  ),
-                ),
-                SizedBox(height: 8),
-                Text(
-                  'Toca para ver los paraderos a través de la cámara',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey[600],
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          SizedBox(height: 16),
-        ],
+            SizedBox(height: 16),
+            // Botón de opciones eliminado completamente
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildSmartStopCard(SmartBusStopModel stop) {
-    final typeColor = _getStopTypeColor(stop.type);
+  Widget _buildSmartStopCard(SmartBusStopModel stop, int index) {
+    final cardColor = Colors.blue[700]!; // Color único para todos los cards
+    final cameraColor = Colors.cyan[600]!; // Color único para todas las cámaras
+    final isExpanded = _expandedStops[index] ?? false;
+    final isSelected = _selectedStopIndex == index;
 
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[200]!),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 4,
-            offset: Offset(0, 2),
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Header con tipo de parada
-            Container(
-              color: typeColor.withOpacity(0.1),
-              padding: EdgeInsets.all(12),
-              child: Row(
-                children: [
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: typeColor,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Center(
-                      child: Text(
-                        stop.type.emoji,
-                        style: TextStyle(fontSize: 20),
-                      ),
-                    ),
-                  ),
-                  SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          stop.type.displayName,
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: typeColor,
-                          ),
-                        ),
-                        Text(
-                          stop.name,
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.bold,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _selectedStopIndex = index;
+          SelectedStopStorage.setSavedStopType(widget.routeRef, _smartStops[index].type.name);
+        });
+      },
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: isSelected ? Colors.blueAccent : Colors.grey[200]!, width: isSelected ? 2 : 1),
+          boxShadow: [
+            BoxShadow(
+              color: isSelected ? Colors.blueAccent.withOpacity(0.15) : Colors.black.withOpacity(0.05),
+              blurRadius: isSelected ? 8 : 4,
+              offset: Offset(0, 2),
             ),
-
-            // Contenido
-            Expanded(
-              child: Padding(
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Header compacto (siempre visible)
+              Container(
+                color: cardColor.withOpacity(0.1),
                 padding: EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                child: Row(
                   children: [
-                    // Razón
-                    Text(
-                      stop.reason,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey[700],
-                        height: 1.4,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    SizedBox(height: 8),
-
-                    // Métricas en fila
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    Stack(
                       children: [
-                        _buildMetric(
-                          icon: Icons.directions_walk,
-                          label: 'Caminar',
-                          value: '${stop.walkingDistance.toStringAsFixed(0)}m',
-                          color: Colors.blue,
+                        Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: cardColor,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Center(
+                            child: Text(
+                              stop.type.emoji,
+                              style: TextStyle(fontSize: 20),
+                            ),
+                          ),
                         ),
-                        _buildMetric(
-                          icon: Icons.schedule,
-                          label: 'Espera',
-                          value: '${stop.estimatedWaitTime}min',
-                          color: Colors.purple,
-                        ),
-                        _buildMetric(
-                          icon: Icons.event_seat,
-                          label: 'Asientos',
-                          value: '${stop.estimatedAvailableSeats}',
-                          color: Colors.green,
-                        ),
+                        if (isSelected)
+                          Positioned(
+                            right: 0,
+                            bottom: 0,
+                            child: Icon(
+                              Icons.check_circle,
+                              color: Colors.green,
+                              size: 22,
+                            ),
+                          ),
                       ],
+                    ),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        stop.type.displayName,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: cardColor,
+                        ),
+                      ),
+                    ),
+                    // Flecha de expansión
+                    GestureDetector(
+                      onTap: () {
+                        setState(() {
+                          _expandedStops[index] = !isExpanded;
+                        });
+                      },
+                      child: Icon(
+                        isExpanded ? Icons.expand_less : Icons.expand_more,
+                        color: cardColor,
+                        size: 24,
+                      ),
+                    ),
+                    SizedBox(width: 8),
+                    // Botón de cámara con tamaño fijo
+                    InkWell(
+                      onTap: () {
+                        _openARView();
+                      },
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: cameraColor,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(
+                          Icons.camera_alt,
+                          color: Colors.white,
+                          size: 24,
+                        ),
+                      ),
                     ),
                   ],
                 ),
               ),
-            ),
-          ],
+
+              // Contenido expandible
+              if (isExpanded)
+                Padding(
+                  padding: EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Nombre del paradero
+                      Text(
+                        stop.name,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      SizedBox(height: 8),
+                      // Razón
+                      Text(
+                        stop.reason,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey[700],
+                          height: 1.4,
+                        ),
+                      ),
+                      SizedBox(height: 12),
+                      // Métricas en fila
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          _buildMetric(
+                            icon: Icons.directions_walk,
+                            label: 'Caminar',
+                            value: '${stop.walkingDistance.toStringAsFixed(0)}m',
+                            color: Colors.blue,
+                          ),
+                          _buildMetric(
+                            icon: Icons.schedule,
+                            label: 'Espera',
+                            value: '${stop.estimatedWaitTime}min',
+                            color: Colors.purple,
+                          ),
+                          _buildMetric(
+                            icon: Icons.event_seat,
+                            label: 'Asientos',
+                            value: '${stop.estimatedAvailableSeats}',
+                            color: Colors.green,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );

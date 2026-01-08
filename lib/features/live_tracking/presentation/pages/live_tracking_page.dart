@@ -18,6 +18,7 @@ import '../widgets/journey_progress_bar.dart';
 import '../widgets/chat_bottom_sheet.dart';
 import '../widgets/sos_bottom_sheet.dart';
 import '../widgets/info_bottom_sheet.dart';
+import '../../../trip_planner/presentation/controllers/map_controller.dart';
 
 /// ============================================
 /// LIVE TRACKING PAGE - REFACTORIZADO
@@ -1113,6 +1114,11 @@ class _LiveTrackingPageState extends State<LiveTrackingPage> with SingleTickerPr
     _busSimulationTimer?.cancel();
     _journeyCheckTimer?.cancel();
     _controller.dispose();
+    // Al salir del LiveTracking, limpiar el estado de ruta en el MapController
+    try {
+      final mapCtrl = MapController();
+      mapCtrl.resetSearch();
+    } catch (_) {}
     super.dispose();
   }
 }

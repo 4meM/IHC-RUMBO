@@ -33,6 +33,7 @@ dependencies:
   # --- MAPAS ---
   google_maps_flutter: ^2.9.0
   http: ^1.2.0
+  webview_flutter: ^4.4.2
 
   # --- SENSORES DEL DISPOSITIVO (Brújula, GPS) ---
   sensors_plus: ^7.0.0

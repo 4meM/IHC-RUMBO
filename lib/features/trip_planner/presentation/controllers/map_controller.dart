@@ -6,6 +6,8 @@ import '../../../../core/utils/map_marker_factory.dart';
 import '../../../../core/utils/map_polyline_factory.dart';
 import '../../../../core/utils/geometry_utils.dart';
 import '../../data/managers/route_search_manager.dart';
+import '../../data/services/smart_bus_stops_service.dart';
+import '../../data/services/selected_stop_storage.dart';
 
 /// Estados posibles durante la selección
 enum MapSelectionPhase { origin, destination, completed }
@@ -13,6 +15,15 @@ enum MapSelectionPhase { origin, destination, completed }
 /// Controller: Manejar todo el estado y lógica del mapa
 /// Propósito único: Coordinar estado, búsquedas y actualizaciones del mapa
 class MapController extends ChangeNotifier {
+  // Singleton instance to preserve state across route pushes/pops
+  static MapController? _instance;
+
+  factory MapController() {
+    _instance ??= MapController._internal();
+    return _instance!;
+  }
+
+  MapController._internal();
   // Controllers de texto
   final TextEditingController originController = TextEditingController();
   final TextEditingController destinationController = TextEditingController();
@@ -53,9 +64,40 @@ class MapController extends ChangeNotifier {
   bool get hasRouteResults => searchResults.isNotEmpty;
   RouteSearchResult? get currentRoute => 
       hasRouteResults ? searchResults[currentRouteIndex] : null;
+
+  /// Calcula el pickup efectivo considerando la selección guardada
+  LatLng? get currentEffectivePickup {
+    final route = currentRoute;
+    if (route == null) return null;
+
+    final userLoc = originPosition ?? currentPosition;
+    if (userLoc == null) return route.pickupPoint;
+
+    try {
+      final savedStopType = SelectedStopStorage.getSavedStopType(route.ref);
+      if (savedStopType != null) {
+        final stops = SmartBusStopsService.generateSmartStopsFromPoints(
+          userLocation: userLoc,
+          routePoints: route.routePoints,
+          routeRef: route.ref,
+        );
+        if (stops.isNotEmpty) {
+          try {
+            final found = stops.firstWhere((s) => s.type.name == savedStopType);
+            return found.location;
+          } catch (_) {
+            return stops.first.location;
+          }
+        }
+      }
+    } catch (_) {}
+
+    return route.pickupPoint;
+  }
   
   /// Inicializar: obtener ubicación y cargar rutas
   Future<void> initialize() async {
+    if (_initialized) return;
     isLoading = true;
     notifyListeners();
     
@@ -77,10 +119,23 @@ class MapController extends ChangeNotifier {
     await _routeManager.loadRoutesFromGeoJson('assets/data-buses/export.geojson');
     
     _updateMarkers();
+    // Escuchar cambios en la selección de paraderos para actualizar marcadores
+    SelectedStopStorage.notifier.addListener(() {
+      // Si hay una ruta actual mostrada, refrescar marcadores y polylines
+      if (currentRoute != null) {
+        _displayRoute(currentRoute!);
+        notifyListeners();
+      } else {
+        _updateMarkers();
+      }
+    });
     isLoading = false;
     notifyListeners();
     _moveToCurrentLocation();
+    _initialized = true;
   }
+
+  bool _initialized = false;
   
   /// Configurar el controller del mapa de Google
   void setMapController(GoogleMapController controller) {
@@ -102,21 +157,56 @@ class MapController extends ChangeNotifier {
   /// Actualizar marcadores en el mapa
   void _updateMarkers() {
     markers.clear();
-    
+
     if (originPosition != null) {
       markers.add(createOriginMarker(originPosition!));
     }
-    
+
     if (destinationPosition != null) {
       markers.add(createDestinationMarker(destinationPosition!));
     }
-    
-    // Agregar marcadores de pickup/dropoff si hay ruta activa
-    if (currentRoute != null) {
-      markers.add(createPickupMarker(currentRoute!.pickupPoint));
+
+    // Agregar marcadores de pickup/dropoff solo si hay ruta activa y estamos mostrando info de ruta
+    if (currentRoute != null && showRouteInfo) {
+      // Usar pickup efectivo si existe selección guardada
+      LatLng pickupToShow = currentRoute!.pickupPoint;
+      try {
+        final savedStopType = SelectedStopStorage.getSavedStopType(currentRoute!.ref);
+        try {
+          // ignore: avoid_print
+          print('[MapController] _updateMarkers routeRef=${currentRoute!.ref} saved=$savedStopType');
+        } catch (_) {}
+        if (savedStopType != null && currentPosition != null) {
+          final stops = SmartBusStopsService.generateSmartStopsFromPoints(
+            userLocation: currentPosition!,
+            routePoints: currentRoute!.routePoints,
+            routeRef: currentRoute!.ref,
+          );
+          if (stops.isNotEmpty) {
+            try {
+              final found = stops.firstWhere((s) => s.type.name == savedStopType);
+              pickupToShow = found.location;
+              try {
+                // ignore: avoid_print
+                print('[MapController] matched saved stop -> type=${found.type.name} at $pickupToShow');
+              } catch (_) {}
+            } catch (_) {
+              // fallback to first
+              pickupToShow = stops.first.location;
+            }
+          }
+        }
+      } catch (_) {}
+
+      markers.add(createPickupMarker(pickupToShow));
       markers.add(createDropoffMarker(currentRoute!.dropoffPoint));
     }
-    
+
+    try {
+      // ignore: avoid_print
+      final ids = markers.map((m) => m.markerId.value).join(',');
+      print('[MapController] _updateMarkers end -> searchResults=${searchResults.length} showRouteInfo=$showRouteInfo markers=${markers.length} ids=[$ids]');
+    } catch (_) {}
     notifyListeners();
   }
   
@@ -133,10 +223,8 @@ class MapController extends ChangeNotifier {
       
       final address = await latLngToAddress(position);
       originController.text = address;
-      isSelectSuggestionOrigin = false;
-      originSuggestions = [];
-      showOriginSuggestions = false;
-      notifyListeners();
+            isSelectSuggestionOrigin = false;
+            notifyListeners();
     } else if (phase == MapSelectionPhase.destination) {
       destinationPosition = position;
       phase = MapSelectionPhase.completed;
@@ -293,11 +381,43 @@ class MapController extends ChangeNotifier {
   void _displayRoute(RouteSearchResult route) {
     polylines.clear();
     
+    // Determinar pickup efectivo (podría ser un paradero seleccionado por el usuario)
+    LatLng effectivePickup = route.pickupPoint;
+      try {
+        final savedStopType = SelectedStopStorage.getSavedStopType(route.ref);
+        try {
+          // ignore: avoid_print
+          print('[MapController] _displayRoute routeRef=${route.ref} saved=$savedStopType');
+        } catch (_) {}
+        if (savedStopType != null && originPosition != null) {
+        final stops = SmartBusStopsService.generateSmartStopsFromPoints(
+          userLocation: originPosition!,
+          routePoints: route.routePoints,
+          routeRef: route.ref,
+        );
+          dynamic found;
+          if (stops.isNotEmpty) {
+            try {
+              found = stops.firstWhere((s) => s.type.name == savedStopType);
+            } catch (_) {
+              found = stops.first;
+            }
+          }
+          if (found != null) {
+            effectivePickup = found.location;
+            try {
+              // ignore: avoid_print
+              print('[MapController] _displayRoute matched saved stop -> type=${found.type.name} at $effectivePickup');
+            } catch (_) {}
+          }
+      }
+    } catch (_) {}
+
     // Polyline de caminar al pickup
     if (originPosition != null) {
       polylines.add(createWalkingPolyline(
         'to_pickup',
-        [originPosition!, route.pickupPoint],
+        [originPosition!, effectivePickup],
       ));
     }
     
@@ -353,6 +473,10 @@ class MapController extends ChangeNotifier {
     showRouteInfo = false;
     polylines.clear();
     _updateMarkers();
+    try {
+      // ignore: avoid_print
+      print('[MapController] resetSearch -> searchResults=${searchResults.length} showRouteInfo=$showRouteInfo markers=${markers.length}');
+    } catch (_) {}
   }
   
   @override

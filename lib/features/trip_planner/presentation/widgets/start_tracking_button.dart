@@ -30,9 +30,10 @@ class StartTrackingButton extends StatelessWidget {
   void _showTrackingOptions(BuildContext context) {
     showModalBottomSheet(
       context: context,
-      builder: (context) => SingleChildScrollView(
-        child: Container(
-          padding: const EdgeInsets.all(16),
+      builder: (context) => SafeArea(
+        child: SingleChildScrollView(
+          child: Container(
+            padding: const EdgeInsets.all(16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -77,6 +78,7 @@ class StartTrackingButton extends StatelessWidget {
               const SizedBox(height: 8),
             ],
           ),
+        ),
         ),
       ),
     );
