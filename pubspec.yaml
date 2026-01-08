@@ -82,6 +82,11 @@ flutter:
     - assets/images/ico_bus.png
     - assets/images/bus_icon.png
     - assets/images/logo-proyecto.png
+    - assets/images/bus_image.png
+    - assets/images/bus2_image.png
+    - assets/images/bus3_image.png
+    - assets/images/bus4_image.png
+    - assets/images/bus5_image.png
 
   # fonts:
   #   - family: Montserrat

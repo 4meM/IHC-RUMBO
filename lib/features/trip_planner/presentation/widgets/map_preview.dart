@@ -234,6 +234,7 @@ class _MapPreviewState extends State<MapPreview> {
               ),
               busDistance: formatDistance(_controller.currentRoute!.busDistance),
               estimatedTime: '${_controller.currentRoute!.getEstimatedTime().toStringAsFixed(0)} min',
+              currentRouteIndex: _controller.currentRouteIndex,
             ),
           
           // Controles de navegación entre rutas
