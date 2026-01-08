@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:camera/camera.dart';
+import 'package:geolocator/geolocator.dart';
+import 'dart:async';
 import 'dart:math' as Math;
 import '../../data/models/smart_bus_stop_model.dart';
 import '../../data/services/compass_service.dart';
 
-/// Widget que simula una vista de AR/Cámara para las paradas inteligentes
-/// Con brújula rotatoria en tiempo real
+/// Widget que usa la cámara real para AR de paradas inteligentes
+/// Muestra los paraderos sobreimpuestos en la vista de cámara en tiempo real
 class SmartStopsARView extends StatefulWidget {
   final List<SmartBusStopModel> stops;
   final LatLng userLocation;
@@ -23,36 +26,147 @@ class SmartStopsARView extends StatefulWidget {
 }
 
 class _SmartStopsARViewState extends State<SmartStopsARView>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   late PageController _pageController;
   int _currentIndex = 0;
   late CompassService _compassService;
   double _deviceHeading = 0.0; // Heading actual del dispositivo (0-360)
+  
+  // Cámara
+  CameraController? _cameraController;
+  List<CameraDescription>? _cameras;
+  bool _cameraInitialized = false;
+  
+  // Geolocalización
+  late StreamSubscription<Position> _positionStream;
+  LatLng? _currentPosition;
+  
+  // Estado del AR
+  Map<int, StopARData> _stopsARData = {};
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _pageController = PageController(initialPage: 0);
     
     // Inicializar compass service
     _compassService = CompassService();
     _compassService.startListening();
-    
-    // Escuchar cambios de heading en tiempo real
     _compassService.headingStream.listen((heading) {
       if (mounted) {
         setState(() {
           _deviceHeading = heading;
+          _updateStopsARData();
+        });
+      }
+    });
+    
+    // Inicializar cámara
+    _initializeCamera();
+    
+    // Inicializar geolocalización
+    _initializeGeolocation();
+  }
+  
+  Future<void> _initializeCamera() async {
+    try {
+      _cameras = await availableCameras();
+      if (_cameras != null && _cameras!.isNotEmpty) {
+        _cameraController = CameraController(
+          _cameras!.first,
+          ResolutionPreset.high,
+          enableAudio: false,
+        );
+        
+        await _cameraController!.initialize();
+        if (mounted) {
+          setState(() => _cameraInitialized = true);
+        }
+      }
+    } catch (e) {
+      print('Error al inicializar cámara: $e');
+    }
+  }
+  
+  void _initializeGeolocation() {
+    _positionStream = Geolocator.getPositionStream(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 5, // Actualizar cada 5 metros
+      ),
+    ).listen((Position position) {
+      if (mounted) {
+        setState(() {
+          _currentPosition = LatLng(position.latitude, position.longitude);
+          _updateStopsARData();
         });
       }
     });
   }
+  
+  void _updateStopsARData() {
+    if (_currentPosition == null) return;
+    
+    _stopsARData.clear();
+    for (int i = 0; i < widget.stops.length; i++) {
+      final stop = widget.stops[i];
+      final distance = _calculateDistance(_currentPosition!, stop.location);
+      final bearing = CompassService.calculateBearing(_currentPosition!, stop.location);
+      final relativeAngle = bearing - _deviceHeading;
+      
+      _stopsARData[i] = StopARData(
+        distance: distance,
+        bearing: bearing,
+        relativeAngle: relativeAngle,
+        screenX: _calculateScreenX(bearing),
+        screenY: _calculateScreenY(distance),
+      );
+    }
+  }
+  
+  double _calculateScreenX(double bearing) {
+    // Convertir bearing a ángulo de pantalla
+    final screenWidth = MediaQuery.of(context).size.width;
+    final relativeAngle = bearing - _deviceHeading;
+    // Normalizar ángulo: -90 a 90 grados en pantalla
+    final normalizedAngle = relativeAngle % 360;
+    final screenAngle = (normalizedAngle - 180) / 180 * (screenWidth / 2);
+    return screenWidth / 2 + screenAngle;
+  }
+  
+  double _calculateScreenY(double distance) {
+    // Los paraderos más cercanos aparecen más arriba
+    // Máximo: 1000m, aparece en bottom
+    // Mínimo: 0m, aparece en top
+    final screenHeight = MediaQuery.of(context).size.height;
+    final normalizedDistance = Math.min(distance / 1000.0, 1.0);
+    return screenHeight * (1.0 - normalizedDistance * 0.7); // 0.7 del alto disponible
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final CameraController? cameraController = _cameraController;
+
+    if (cameraController == null || !cameraController.value.isInitialized) {
+      return;
+    }
+
+    if (state == AppLifecycleState.inactive) {
+      cameraController.dispose();
+    } else if (state == AppLifecycleState.resumed) {
+      _initializeCamera();
+    }
+  }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _pageController.dispose();
     _compassService.stopListening();
     _compassService.dispose();
+    _cameraController?.dispose();
+    _positionStream.cancel();
     super.dispose();
   }
 
@@ -78,37 +192,82 @@ class _SmartStopsARViewState extends State<SmartStopsARView>
   Widget build(BuildContext context) {
     return Stack(
       children: [
-        // Fondo de AR simulado (gradiente azul cielo)
-        Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [
-                Colors.blue[900]!,
-                Colors.blue[700]!,
-                Colors.cyan[300]!,
-              ],
+        // Cámara en vivo como fondo
+        if (_cameraInitialized && _cameraController != null)
+          CameraPreview(_cameraController!)
+        else
+          Container(
+            color: Colors.black,
+            child: Center(
+              child: CircularProgressIndicator(color: Colors.white),
             ),
           ),
-        ),
 
-        // Centro: Brújula + Paraderos orbitando (Vista AR mejorada)
-        Center(
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              // Círculos de referencia AR
-              ..._buildARCircles(),
-              
-              // Paraderos como puntos flotantes alrededor de la brújula
-              ..._buildFloatingStops(),
-              
-              // Brújula en el centro
-              _buildCompass(),
-            ],
+        // Capa de AR con paraderos sobreimpuestos
+        if (_currentPosition != null)
+          Positioned.fill(
+            child: Stack(
+              children: [
+                // Paraderos AR
+                ..._buildARStopsOverlay(),
+                
+                // Brújula en la esquina superior izquierda
+                Positioned(
+                  top: 80,
+                  left: 20,
+                  child: _buildCompassWidget(),
+                ),
+                
+                // Indicador de información de ubicación actual
+                Positioned(
+                  top: 12,
+                  left: 12,
+                  child: Container(
+                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.black54,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Brújula: ${_deviceHeading.toStringAsFixed(0)}°',
+                          style: TextStyle(
+                            color: Colors.cyan,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        Text(
+                          'Pitch: 79.5°',
+                          style: TextStyle(
+                            color: Colors.white70,
+                            fontSize: 11,
+                          ),
+                        ),
+                        Text(
+                          'Roll: -3.6°',
+                          style: TextStyle(
+                            color: Colors.white70,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          )
+        else
+          Center(
+            child: Text(
+              'Obteniendo ubicación...',
+              style: TextStyle(color: Colors.white),
+            ),
           ),
-        ),
 
         // Información en la parte superior (compacta)
         Positioned(
@@ -162,126 +321,94 @@ class _SmartStopsARViewState extends State<SmartStopsARView>
           ),
         ),
 
-        // Indicadores de página
+        // Panel inferior con detalles del paradero más cercano
         Positioned(
-          bottom: 120,
+          bottom: 0,
           left: 0,
           right: 0,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: List.generate(
-              widget.stops.length,
-              (index) => Container(
-                width: 8,
-                height: 8,
-                margin: EdgeInsets.symmetric(horizontal: 4),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: _currentIndex == index ? Colors.white : Colors.white54,
-                ),
-              ),
-            ),
-          ),
-        ),
-
-        // Botón para ver detalles (inferior)
-        Positioned(
-          bottom: 24,
-          left: 16,
-          right: 16,
-          child: GestureDetector(
-            onTap: _showDetailsModal,
-            child: Container(
-              padding: EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-              decoration: BoxDecoration(
-                color: Colors.blue,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [BoxShadow(blurRadius: 8, color: Colors.black38)],
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.info, color: Colors.white, size: 18),
-                  SizedBox(width: 8),
-                  Text(
-                    'Ver detalles del paradero',
-                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-                  ),
-                ],
-              ),
-            ),
-          ),
+          child: _buildClosestStopPanel(),
         ),
       ],
     );
   }
 
-  /// Dibuja círculos de referencia AR alrededor del centro
-  List<Widget> _buildARCircles() {
-    final sizes = [150.0, 250.0, 350.0];
-    return sizes.map((size) {
-      return Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          border: Border.all(
-            color: Colors.white.withOpacity(0.15),
-            width: 1,
-          ),
-        ),
-      );
-    }).toList();
-  }
-
-  /// Construye los paraderos como puntos flotantes alrededor de la brújula
-  List<Widget> _buildFloatingStops() {
-    final List<Widget> stops = [];
-    final baseRadius = 180.0; // Radio de órbita de los paraderos
-
+  /// Construye los paraderos como overlays AR en la pantalla de cámara
+  List<Widget> _buildARStopsOverlay() {
+    final List<Widget> stopsWidgets = [];
+    
     for (int i = 0; i < widget.stops.length; i++) {
       final stop = widget.stops[i];
+      final arData = _stopsARData[i];
       
-      // Ángulo del paradero
-      final angle = (i * 120.0 * Math.pi / 180.0); // Distribuir espaciadamente
+      if (arData == null) continue;
       
-      // Calcular posición basada en el heading del dispositivo
-      final adjustedAngle = angle - (_deviceHeading * Math.pi / 180.0);
-      final dx = baseRadius * Math.cos(adjustedAngle);
-      final dy = baseRadius * Math.sin(adjustedAngle);
-
-      stops.add(
-        Transform.translate(
-          offset: Offset(dx, dy),
+      // Validar que el paradero esté en el rango visible (±130 grados para más cobertura)
+      if (arData.relativeAngle.abs() > 130) continue;
+      
+      final screenWidth = MediaQuery.of(context).size.width;
+      final screenHeight = MediaQuery.of(context).size.height;
+      
+      // Calcular posición más precisa (rango expandido)
+      final offsetX = (arData.relativeAngle / 130) * (screenWidth / 2);
+      final centerX = screenWidth / 2 + offsetX;
+      
+      // Paraderos más cercanos aparecen más arriba
+      final normalizedDistance = Math.min(arData.distance / 1000.0, 1.0);
+      final centerY = screenHeight * (0.2 + normalizedDistance * 0.6);
+      
+      // Tamaño inversamente proporcional a la distancia
+      final size = Math.max(40.0, 120.0 - (normalizedDistance * 50));
+      
+      stopsWidgets.add(
+        Positioned(
+          left: centerX - size / 2,
+          top: centerY - size / 2,
           child: GestureDetector(
             onTap: () => _selectStop(i),
             child: Container(
-              width: 70,
-              height: 70,
+              width: size,
+              height: size,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: _currentIndex == i ? Colors.green : Colors.orange[400],
                 boxShadow: [
                   BoxShadow(
-                    color: (_currentIndex == i ? Colors.green : Colors.orange).withOpacity(0.6),
-                    blurRadius: 12,
-                    spreadRadius: 2,
+                    color: (_currentIndex == i ? Colors.green : Colors.orange).withOpacity(0.7),
+                    blurRadius: 16,
+                    spreadRadius: 3,
                   ),
                 ],
+                border: Border.all(
+                  color: Colors.white,
+                  width: 2,
+                ),
               ),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.location_on, color: Colors.white, size: 22),
-                  SizedBox(height: 2),
+                  Icon(
+                    Icons.location_on,
+                    color: Colors.white,
+                    size: Math.max(18.0, size * 0.4),
+                  ),
+                  SizedBox(height: size > 60 ? 4 : 2),
                   Text(
-                    '${(i + 1)}',
+                    '${i + 1}',
                     style: TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.bold,
-                      fontSize: 12,
+                      fontSize: Math.max(12.0, size * 0.3),
                     ),
                   ),
+                  if (size > 60)
+                    Text(
+                      _formatDistance(arData.distance),
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: size * 0.28,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -289,8 +416,243 @@ class _SmartStopsARViewState extends State<SmartStopsARView>
         ),
       );
     }
+    
+    return stopsWidgets;
+  }
 
-    return stops;
+  /// Construye el widget de la brújula mejorada con aguja al paradero más cercano
+  Widget _buildCompassWidget() {
+    // Encontrar el paradero más cercano para la aguja
+    int closestIndex = 0;
+    double minDistance = double.infinity;
+    
+    for (int i = 0; i < widget.stops.length; i++) {
+      final arData = _stopsARData[i];
+      if (arData != null && arData.distance < minDistance) {
+        minDistance = arData.distance;
+        closestIndex = i;
+      }
+    }
+    
+    final closestData = _stopsARData[closestIndex];
+    final closestBearing = closestData?.bearing ?? 0.0;
+    
+    return Container(
+      width: 110,
+      height: 110,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: Colors.white.withOpacity(0.95),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black38,
+            blurRadius: 12,
+            spreadRadius: 2,
+          ),
+        ],
+        border: Border.all(
+          color: Colors.cyan,
+          width: 3,
+        ),
+      ),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          // Brújula pintada
+          CustomPaint(
+            size: Size(110, 110),
+            painter: CompassPainter(deviceHeading: _deviceHeading),
+          ),
+          // Aguja roja que apunta al paradero más cercano
+          if (closestData != null)
+            Transform.rotate(
+              angle: closestBearing * Math.pi / 180.0,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  // Línea hacia arriba
+                  Container(
+                    width: 4,
+                    height: 35,
+                    decoration: BoxDecoration(
+                      color: Colors.red,
+                      borderRadius: BorderRadius.circular(2),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.red.withOpacity(0.9),
+                          blurRadius: 4,
+                        )
+                      ],
+                    ),
+                  ),
+                  // Punta de flecha
+                  Container(
+                    width: 12,
+                    height: 12,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.red,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.red.withOpacity(0.9),
+                          blurRadius: 6,
+                        )
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          // Punto central
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.black,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Panel que muestra el paradero más cercano
+  Widget _buildClosestStopPanel() {
+    if (_stopsARData.isEmpty) {
+      return SizedBox.shrink();
+    }
+    
+    // Encontrar el paradero más cercano
+    int closestIndex = 0;
+    double minDistance = double.infinity;
+    
+    for (int i = 0; i < widget.stops.length; i++) {
+      final arData = _stopsARData[i];
+      if (arData != null && arData.distance < minDistance) {
+        minDistance = arData.distance;
+        closestIndex = i;
+      }
+    }
+    
+    final closestStop = widget.stops[closestIndex];
+    final closestData = _stopsARData[closestIndex]!;
+    
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.85),
+        borderRadius: BorderRadius.only(
+          topLeft: Radius.circular(20),
+          topRight: Radius.circular(20),
+        ),
+        border: Border(
+          top: BorderSide(
+            color: _getStopTypeColor(closestStop.type),
+            width: 3,
+          ),
+        ),
+      ),
+      padding: EdgeInsets.all(16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: _getStopTypeColor(closestStop.type),
+                ),
+                child: Icon(Icons.location_on, color: Colors.white, size: 20),
+              ),
+              SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '¡PARADERO MUY CERCANO!',
+                      style: TextStyle(
+                        color: Colors.green,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      closestStop.name,
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              _buildPanelInfo('Distancia', _formatDistance(closestData.distance)),
+              _buildPanelInfo('Rutas', '${closestStop.routes.length}'),
+              _buildPanelInfo('Ocupación', '${(closestStop.crowdLevel * 100).toStringAsFixed(0)}%'),
+              _buildPanelInfo('Asientos', '${closestStop.estimatedAvailableSeats}'),
+            ],
+          ),
+          SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () => _showDetailsModal(),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _getStopTypeColor(closestStop.type),
+                padding: EdgeInsets.symmetric(vertical: 10),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: Text(
+                'Ver detalles',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPanelInfo(String label, String value) {
+    return Column(
+      children: [
+        Text(
+          value,
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 14,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        SizedBox(height: 4),
+        Text(
+          label,
+          style: TextStyle(
+            color: Colors.white70,
+            fontSize: 11,
+          ),
+        ),
+      ],
+    );
   }
 
   void _selectStop(int index) {
@@ -779,6 +1141,23 @@ class _SmartStopsARViewState extends State<SmartStopsARView>
     final c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return earthRadius * c;
   }
+}
+
+/// Datos de AR para un paradero individual
+class StopARData {
+  final double distance;
+  final double bearing;
+  final double relativeAngle;
+  final double screenX;
+  final double screenY;
+
+  StopARData({
+    required this.distance,
+    required this.bearing,
+    required this.relativeAngle,
+    required this.screenX,
+    required this.screenY,
+  });
 }
 
 /// CustomPainter que dibuja una brújula rotatoria
