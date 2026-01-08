@@ -146,7 +146,51 @@ class _RouteDetailPageState extends State<RouteDetailPage> {
               ),
             ),
             SizedBox(height: 16),
-            // Botón de opciones eliminado completamente
+            // Botones de Paraderos e Iniciar Viaje
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: _openARView,
+                      icon: Icon(Icons.location_on),
+                      label: Text('Paraderos'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue,
+                        foregroundColor: Colors.white,
+                        padding: EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
+                  ),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        // Abrir StartTrackingButton o navegar a viaje
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Iniciando viaje en ${_smartStops[_selectedStopIndex].name}')),
+                        );
+                      },
+                      icon: Icon(Icons.navigation),
+                      label: Text('Iniciar viaje'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        foregroundColor: Colors.white,
+                        padding: EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            SizedBox(height: 16),
           ],
         ),
       ),

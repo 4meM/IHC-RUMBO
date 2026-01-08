@@ -81,6 +81,7 @@ flutter:
     - assets/data-buses/export.geojson
     - assets/images/ico_bus.png
     - assets/images/bus_icon.png
+    - assets/images/logo-proyecto.png
 
   # fonts:
   #   - family: Montserrat

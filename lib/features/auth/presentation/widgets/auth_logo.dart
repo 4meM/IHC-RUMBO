@@ -30,10 +30,11 @@ class AuthLogo extends StatelessWidget {
         ],
       ),
       child: Center(
-        child: Icon(
-          Icons.directions_bus_rounded,
-          size: size * 0.4,
-          color: AppColors.primary,
+        child: Image.asset(
+          'assets/images/logo-proyecto.png',
+          width: size * 0.8,
+          height: size * 0.8,
+          fit: BoxFit.contain,
         ),
       ),
     );

@@ -27,63 +27,6 @@ class StartTrackingButton extends StatelessWidget {
     this.dropoffPoint,
   });
 
-  void _showTrackingOptions(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      builder: (context) => SafeArea(
-        child: SingleChildScrollView(
-          child: Container(
-            padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                'Selecciona una opción',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              // Opción 1: Ver Paraderos Inteligentes en AR
-              ListTile(
-                contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-                leading: const Icon(Icons.camera_alt, color: Colors.blue),
-                title: const Text('Ver Paraderos en AR'),
-                subtitle: const Text('Muestra paraderos con brújula'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _goToRouteDetail(context);
-                },
-              ),
-              const SizedBox(height: 8),
-              // Opción 2: Iniciar Tracking en Vivo
-              ListTile(
-                contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-                leading: const Icon(Icons.directions_bus, color: Colors.green),
-                title: const Text('Iniciar Tracking'),
-                subtitle: const Text('Sigue el viaje en vivo'),
-                onTap: () {
-                  Navigator.pop(context);
-                  goToLiveTracking(
-                    context,
-                    busNumber: busNumber,
-                    routeName: routeName,
-                    origin: origin,
-                    destination: destination,
-                    routePoints: routePoints,
-                    initialBusPosition: pickupPoint,
-                    pickupPoint: pickupPoint,
-                    dropoffPoint: dropoffPoint,
-                  );
-                },
-              ),
-              const SizedBox(height: 8),
-            ],
-          ),
-        ),
-        ),
-      ),
-    );
-  }
-
   void _goToRouteDetail(BuildContext context) {
     final route = BusRouteModel(
       id: busNumber,
@@ -109,16 +52,43 @@ class StartTrackingButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return FloatingActionButton.extended(
-      onPressed: () => _showTrackingOptions(context),
-      icon: const Icon(Icons.more_vert),
-      label: const Text(
-        'Opciones',
-        style: TextStyle(fontWeight: FontWeight.w600),
-      ),
-      backgroundColor: AppColors.accent,
-      foregroundColor: Colors.white,
-      elevation: 4,
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Botón Paraderos
+        FloatingActionButton.extended(
+          onPressed: () => _goToRouteDetail(context),
+          icon: const Icon(Icons.location_on),
+          label: const Text('Paraderos'),
+          backgroundColor: Colors.blue,
+          foregroundColor: Colors.white,
+          elevation: 4,
+        ),
+        const SizedBox(width: 12),
+        // Botón Iniciar viaje
+        FloatingActionButton.extended(
+          onPressed: () => _startTracking(context),
+          icon: const Icon(Icons.navigation),
+          label: const Text('Iniciar viaje'),
+          backgroundColor: Colors.green,
+          foregroundColor: Colors.white,
+          elevation: 4,
+        ),
+      ],
+    );
+  }
+
+  void _startTracking(BuildContext context) {
+    goToLiveTracking(
+      context,
+      busNumber: busNumber,
+      routeName: routeName,
+      origin: origin,
+      destination: destination,
+      routePoints: routePoints,
+      initialBusPosition: pickupPoint,
+      pickupPoint: pickupPoint,
+      dropoffPoint: dropoffPoint,
     );
   }
 }
